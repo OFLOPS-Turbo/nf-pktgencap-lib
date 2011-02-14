@@ -1,0 +1,20 @@
+# Process this file with autoconf to produce a configure script.
+AC_INIT(sic/eval.h)
+
+# Checks for programs.
+
+# Checks for libraries.
+
+# Checks for header files.
+AC_HEADER_STDC
+AC_CHECK_HEADERS(strings.h unistd.h)
+
+# Checks for typedefs, structures, and compiler characteristics.
+AC_C_CONST
+AC_TYPE_SIZE_T
+
+# Checks for library functions.
+AC_FUNC_VPRINTF
+AC_CHECK_FUNCS(strerror)
+
+AC_OUTPUT()
