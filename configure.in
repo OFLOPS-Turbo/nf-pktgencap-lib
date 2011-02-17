@@ -1,7 +1,17 @@
 # Process this file with autoconf to produce a configure script.
-AC_INIT(sic/eval.h)
+AC_PREREQ([2.59])
+AC_INIT([netfpga-packet-generator-c-library], [0.01], [cr409@cl.cam.ac.uk])
+AM_INIT_AUTOMAKE([-Wall foreign])
+AC_CONFIG_SRCDIR([src])
+AC_CONFIG_HEADERS([config.h])
+AC_CONFIG_MACRO_DIR([m4])
 
 # Checks for programs.
+AC_PROG_CC
+AC_PROG_INSTALL
+AC_PROG_AWK
+AC_PROG_CPP
+AC_PROG_LIBTOOL
 
 # Checks for libraries.
 
@@ -13,8 +23,15 @@ AC_CHECK_HEADERS(strings.h unistd.h)
 AC_C_CONST
 AC_TYPE_SIZE_T
 
+# Checks for typedefs, structures, and compiler characteristics.
+AC_HEADER_STDBOOL
+
 # Checks for library functions.
-AC_FUNC_VPRINTF
-AC_CHECK_FUNCS(strerror)
+AC_CHECK_FUNCS([strerror])
+
+
+AC_CONFIG_FILES([Makefile \
+	         src/Makefile \
+		 examples/Makefile])
 
 AC_OUTPUT()
