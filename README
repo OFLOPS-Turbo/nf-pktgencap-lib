@@ -1,0 +1,13 @@
+API usage
+==========
+
+1) init the library - nf_init
+2) set rate limit of the generating queues - rate_limiter_set
+3) load data from pcap or each  packet uniquely - load_packet, load_pcap
+4) enable/disable rate limiters - rate_limiter_enable, rate_limiter_disable
+5) set on which interface you want to capture data and get the relevant 
+   filedescriptors - capture_data_enable
+7) enable the pakcet generator (start also pkt capturing)
+8) wait until it finished(is_pktgen_finished()/wait_until_finished())
+9) terminate nf packet_generator - nf_finish
+
