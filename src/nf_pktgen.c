@@ -165,7 +165,7 @@ nf_init(int pad, int nodrop,int resolve_ns) {
   free(nf_pktgen.iterations);
   nf_pktgen.iterations = (uint32_t *)xmalloc(NUM_PORTS*sizeof(uint32_t));
   for (i = 0 ; i < NUM_PORTS ; i++)
-    nf_pktgen.iterations[i] = 1;
+    nf_pktgen.iterations[i] = 0;
   free(nf_pktgen.delay);
   nf_pktgen.delay = (float *)xmalloc(NUM_PORTS*sizeof(float));
   bzero(nf_pktgen.delay, NUM_PORTS*sizeof(float));
@@ -271,7 +271,7 @@ load_queues(int queue) {
 // Append a packet on the local data cache of the data send out of a specific port
 // Arguments: data             A pointer to the data cache
 //            port             The number of the port we want to output the packet
-//            delay            Delay from the previous packet
+//            delay            Delay from the previous packet in microseconds
 ////////////////////////////////////////////////////////////
 int
 nf_gen_load_packet(struct pcap_pkthdr *h, const unsigned char *data, int port, int32_t delay) {
@@ -296,8 +296,8 @@ nf_gen_load_packet(struct pcap_pkthdr *h, const unsigned char *data, int port, i
   // Work out if this packet should be padded
   if ((nf_pktgen.pad) && (non_pad_len > 64)) {
     write_pad = 1;
-    non_pad_len = 64;
-    non_pad_word_len = 8;
+    non_pad_len = 72;
+    non_pad_word_len = 9;
   }
   
   // Check if there is room in the queue for the entire packet
@@ -422,7 +422,7 @@ nf_gen_load_packet(struct pcap_pkthdr *h, const unsigned char *data, int port, i
     nf_pktgen.queue_data[port] = realloc(nf_pktgen.queue_data[port], 
 					  nf_pktgen.queue_data_len[port]);
     nf_pktgen.queue_data[port][pointer] = (uint8_t)ctrl;
-    bzero(nf_pktgen.queue_data[port] + pointer + 1, 8);
+    //bzero(nf_pktgen.queue_data[port] + pointer + 1, 8);
     memcpy(nf_pktgen.queue_data[port] + pointer + 1, data + i, 8);
 #if DEBUG
     printf("0x%02x 0x%02x%02lx%02lx%02lx 0x%02x%02lx%02lx%02lx\n",  
@@ -501,6 +501,7 @@ nf_gen_load_pcap(const char *filename, int port, int32_t delay) {
       fprintf(stderr, " or more packets in '$pcap_filename'. Packets will be0001fffc padded with zeros.\n");
     }
 
+
 #if DEBUG
     printf("load packet on queue %d, with delay %ld\n", 
 	   port, delay);
@@ -531,19 +532,15 @@ nf_gen_load_pcap(const char *filename, int port, int32_t delay) {
 /////////////////////////////////////////////////////////////////
 int 
 nf_gen_set_number_iterations(int number_iterations, int iterations_enable, int queue) {
-  writeReg(&nf_pktgen.nf2, 
-	   OQ_QUEUE_0_CTRL_REG+(queue+2*NUM_PORTS)*nf_pktgen.queue_addr_offset, 
-	   0x1);
-  printf("%X %X\n",
-	 OQ_QUEUE_0_CTRL_REG+(queue+2*NUM_PORTS)*nf_pktgen.queue_addr_offset, 0x1);
 
-   writeReg(&nf_pktgen.nf2, 
-	   OQ_QUEUE_0_MAX_ITER_REG+(queue+2*NUM_PORTS)*nf_pktgen.queue_addr_offset, 
-	   number_iterations);
-  printf("%X %X\n",
-	 OQ_QUEUE_0_MAX_ITER_REG+(queue+2*NUM_PORTS)*nf_pktgen.queue_addr_offset,
-	 number_iterations);
-  nf_pktgen.iterations[queue] = number_iterations;
+  if((queue >=0) && (queue < NUM_PORTS)) {
+    
+      writeReg(&nf_pktgen.nf2, OQ_QUEUE_0_CTRL_REG+(queue+2*NUM_PORTS)*nf_pktgen.queue_addr_offset, 
+	       0x1); 
+      writeReg(&nf_pktgen.nf2, OQ_QUEUE_0_MAX_ITER_REG+(queue+2*NUM_PORTS)*nf_pktgen.queue_addr_offset, 
+	        number_iterations );
+    nf_pktgen.iterations[queue] = number_iterations;
+  }
    return 1;
 }
 
@@ -578,6 +575,9 @@ nf_gen_rate_limiter_set(int port, int cpu, float rate) {
   // Check if we really need to limit this port
   if (rate < 1)
     return 0;
+
+  if(!cpu)
+    nf_pktgen.rate[port] = rate;
   
   clks_between_tokens = 1;
   rate = (rate * 1000) / BITS_PER_TOKEN;
@@ -639,8 +639,9 @@ nf_gen_rate_limiter_set(int port, int cpu, float rate) {
 ////////////////////////////////////////////////////////////////
 int
 nf_gen_rate_limiter_disable(int port, int cpu) {
-  int queue = 2*port + 1;
+  int queue = 2*port + cpu;
   uint32_t rate_limit_offset = RATE_LIMIT_1_CTRL_REG - RATE_LIMIT_0_CTRL_REG;
+  printf("rate limiter port %d%08x\n", port, RATE_LIMIT_0_CTRL_REG+(queue*rate_limit_offset));
    return writeReg(&nf_pktgen.nf2, 
 		   RATE_LIMIT_0_CTRL_REG+(queue*rate_limit_offset), 0x0);
    //return 0;
@@ -711,56 +712,60 @@ queue_reorganize() {
   // Note: 3 queues per port -- rx, tx and tx-during-setup
   for (i = 0; i < 3 * NUM_PORTS; i++) {
     writeReg(&nf_pktgen.nf2, OQ_QUEUE_0_CTRL_REG + (i*queue_addr_offset), 0x00);
+
+#if DEBUG
     printf("%08lx %08lx\n", OQ_QUEUE_0_CTRL_REG + (i*queue_addr_offset), 0x00);
+#endif
   }
   
   // Resize the queues
   for (i = 0; i < NUM_PORTS; i++) {
     // Set queue sizes for tx-during-setup queues
-    writeReg(&nf_pktgen.nf2,
-	     (OQ_QUEUE_0_ADDR_LO_REG + (i * 2)*queue_addr_offset), curr_addr);
+#if DEBUG
     printf("%08lx %08lx\n", (OQ_QUEUE_0_ADDR_LO_REG + (i * 2)*queue_addr_offset), curr_addr);
-		 
+    printf("%08lx %08lx\n", (OQ_QUEUE_0_ADDR_HI_REG + (i*2)*queue_addr_offset), curr_addr + XMIT_QUEUE_SIZE - 1);
+    printf("%08lx %08lx\n", (OQ_QUEUE_0_CTRL_REG + (i*2)*queue_addr_offset), 0x02);
+#endif	
+    writeReg(&nf_pktgen.nf2,
+	     (OQ_QUEUE_0_ADDR_LO_REG + (i * 2)*queue_addr_offset), curr_addr);	 
     writeReg(&nf_pktgen.nf2, 
 	     (OQ_QUEUE_0_ADDR_HI_REG + (i*2)*queue_addr_offset), 
 	     curr_addr + XMIT_QUEUE_SIZE - 1);
-    printf("%08lx %08lx\n", (OQ_QUEUE_0_ADDR_HI_REG + (i*2)*queue_addr_offset), curr_addr + XMIT_QUEUE_SIZE - 1);
-
     writeReg(&nf_pktgen.nf2, 
 	     (OQ_QUEUE_0_CTRL_REG + (i*2)*queue_addr_offset), 0x02);
-    printf("%08lx %08lx\n", (OQ_QUEUE_0_CTRL_REG + (i*2)*queue_addr_offset), 0x02);
     curr_addr += XMIT_QUEUE_SIZE;
 
     // Set queue sizes for RX queues
+#if DEBUG
+    printf("%08lx %08lx\n", (OQ_QUEUE_0_ADDR_LO_REG + (i*2+1)*queue_addr_offset), curr_addr);
+    printf("%08lx %08lx\n", (OQ_QUEUE_0_ADDR_HI_REG + (i*2+1)*queue_addr_offset), curr_addr + rx_queue_size[i] - 1);
+    printf("%08lx %08lx\n", (OQ_QUEUE_0_CTRL_REG + (i*2 + 1) * queue_addr_offset), 0x02);
+#endif 
     writeReg(&nf_pktgen.nf2, 
 	     (OQ_QUEUE_0_ADDR_LO_REG + (i*2+1)*queue_addr_offset), curr_addr);
-    printf("%08lx %08lx\n", (OQ_QUEUE_0_ADDR_LO_REG + (i*2+1)*queue_addr_offset), curr_addr);
-    
     writeReg(&nf_pktgen.nf2, 
 	     (OQ_QUEUE_0_ADDR_HI_REG + (i*2+1)*queue_addr_offset), curr_addr + rx_queue_size[i] - 1);
-    printf("%08lx %08lx\n", (OQ_QUEUE_0_ADDR_HI_REG + (i*2+1)*queue_addr_offset), curr_addr + rx_queue_size[i] - 1);
-    
     writeReg(&nf_pktgen.nf2,
 	     (OQ_QUEUE_0_CTRL_REG + (i*2 + 1) * queue_addr_offset), 0x02);
-    printf("%08lx %08lx\n", (OQ_QUEUE_0_CTRL_REG + (i*2 + 1) * queue_addr_offset), 0x02);
     curr_addr += rx_queue_size[i];
   }
 
   for (i = 0; i < NUM_PORTS; i++) {
     uint32_t queue_size = get_queue_size(i);
-
+#if DEBUG
+    printf("%08lx %08lx\n", (OQ_QUEUE_0_ADDR_LO_REG + (i + 2*NUM_PORTS)*queue_addr_offset), curr_addr);
+    printf("%08lx %08lx\n", (OQ_QUEUE_0_ADDR_HI_REG + (i + 2*NUM_PORTS)*queue_addr_offset), curr_addr + queue_size - 1);
+    printf("%08lx %08lx\n",(OQ_QUEUE_0_CTRL_REG + (i + 2*NUM_PORTS)*queue_addr_offset),0x02);
+#endif
     // Set queue sizes for TX queues
     writeReg(&nf_pktgen.nf2, 
 	     (OQ_QUEUE_0_ADDR_LO_REG + (i + 2*NUM_PORTS)*queue_addr_offset), 
 	     curr_addr);
-    printf("%08lx %08lx\n", (OQ_QUEUE_0_ADDR_LO_REG + (i + 2*NUM_PORTS)*queue_addr_offset), curr_addr);
     
     writeReg(&nf_pktgen.nf2,(OQ_QUEUE_0_ADDR_HI_REG+(i+2*NUM_PORTS)*queue_addr_offset), 
 	     curr_addr + queue_size - 1);
-    printf("%08lx %08lx\n", (OQ_QUEUE_0_ADDR_HI_REG + (i + 2*NUM_PORTS)*queue_addr_offset), curr_addr + queue_size - 1);
     
     writeReg(&nf_pktgen.nf2,(OQ_QUEUE_0_CTRL_REG+(i+2*NUM_PORTS)*queue_addr_offset),0x02);
-    printf("%08lx %08lx\n",(OQ_QUEUE_0_CTRL_REG + (i + 2*NUM_PORTS)*queue_addr_offset),0x02);
 
     nf_pktgen.queue_base_addr[i] = curr_addr;
     curr_addr += queue_size;
@@ -770,7 +775,9 @@ queue_reorganize() {
   for (i = 0; i < 2*NUM_PORTS; i++) {
     writeReg(&nf_pktgen.nf2, 
 	     (OQ_QUEUE_0_CTRL_REG + i*queue_addr_offset), 0x01);
+#if DEBUG
     printf("%08lx %08lx\n",(OQ_QUEUE_0_CTRL_REG + i*queue_addr_offset), 0x01);
+#endif
   }
 
   return 0;
@@ -820,11 +827,10 @@ nf_start(int  wait) {
   }
 
   //set on the cpu queues a rate limiter
-/*   for (i = 0; i < 4; i++) { */
-/*     nf_gen_rate_limiter_set(i,1, 200000.0); */
-/*     nf_gen_rate_limiter_enable(i, 1); */
-    
-/*   } */
+  for (i = 0; i < 4; i++) {
+    nf_gen_rate_limiter_set(i,1, 200000.0);
+    nf_gen_rate_limiter_enable(i, 1);
+  }
 
   //Enable the packet generator hardware to send the packets
   int drop = 0;
@@ -835,6 +841,15 @@ nf_start(int  wait) {
 	drop |= (1 << i);
       }    
     drop <<= 8;
+  }
+
+  for (i = 0; i < NUM_PORTS;i++) {
+    if(nf_pktgen.iterations[i]) {
+      writeReg(&nf_pktgen.nf2, OQ_QUEUE_0_CTRL_REG+(i+2*NUM_PORTS)*nf_pktgen.queue_addr_offset, 
+	       0x1); 
+      writeReg(&nf_pktgen.nf2, OQ_QUEUE_0_MAX_ITER_REG+(i+2*NUM_PORTS)*nf_pktgen.queue_addr_offset, 
+	       nf_pktgen.iterations[i] );
+    }
   }
 
 #if DEBUG
@@ -872,7 +887,7 @@ nf_finish() {
 
 //////////////////////////////////////////////////////////////////
 // name: nf_gen_finished
-// The function after the last packet has been send. 
+// The function after the l]ast packet has been send. 
 //////////////////////////////////////////////////////////////////
 int
 nf_gen_wait_end() {

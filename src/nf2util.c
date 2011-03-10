@@ -23,6 +23,8 @@
 
 #include <arpa/inet.h>
 
+#include <execinfo.h>
+
 #include "nf2.h"
 #include "nf2util.h"
 
@@ -139,6 +141,22 @@ static int readRegFile(struct nf2device *nf2, unsigned reg, unsigned *val)
  */
 int writeReg(struct nf2device *nf2, unsigned reg, unsigned val)
 {
+#if DEBUG
+  void *array[10];
+  size_t size, i;
+  char **strings;
+  
+  size = backtrace (array, 10);
+  strings = backtrace_symbols (array, size);
+
+  FILE* out = fopen("/tmp/output.txt", "a");
+  if(out != NULL) {
+    fprintf(out, "%s %06x %06x\n", strings[1], reg, val);
+    fclose(out);
+  }
+  free (strings);
+#endif
+
 	if (nf2->net_iface)
 	{
 		return writeRegNet(nf2, reg, val);
