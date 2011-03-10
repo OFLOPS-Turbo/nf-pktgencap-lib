@@ -11,7 +11,7 @@ main(int argc, char *argv[]) {
   printf("Initiating packet generator\n");
 
   //enable padding
-  nf_init(1, 0, 0); 
+  nf_init(1, 0, 1); 
 
 /*   // Set the number of iterations for the queues with pcap files */
   nf_gen_rate_limiter_disable(0, 0);
@@ -29,7 +29,6 @@ main(int argc, char *argv[]) {
 
   // Wait until the correct number of packets is sent
   nf_finish();
-  //  system (PKT_CMD);
 
   return 0;
 

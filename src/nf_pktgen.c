@@ -88,6 +88,23 @@ int queue_reorganize();
 uint32_t time();
 int load_queues(int queue);
 
+uint64_t
+ntohll(uint64_t val) {
+  uint64_t ret = 0;
+
+  ret=((val & 0x00000000000000FF) << 56) |
+    ((val & 0x000000000000FF00) << 40) |
+    ((val & 0x0000000000FF0000) << 24) |
+    ((val & 0x00000000FF000000) << 8)  |
+    ((val & 0x000000FF00000000) >> 8)  |
+    ((val & 0x0000FF0000000000) >> 24) |
+    ((val & 0x00FF000000000000) >> 40) |
+    ((val & 0xFF00000000000000) >> 56);
+
+  return ret;
+}
+
+
 /*
  * TODO:
  * - add code to verify that the right bitfile is downloaded.
@@ -827,17 +844,17 @@ nf_start(int  wait) {
   }
 
   //set on the cpu queues a rate limiter
-  for (i = 0; i < 4; i++) {
-    nf_gen_rate_limiter_set(i,1, 200000.0);
-    nf_gen_rate_limiter_enable(i, 1);
-  }
+/*   for (i = 0; i < 4; i++) { */
+/*     nf_gen_rate_limiter_set(i,1, 200000.0); */
+/*     nf_gen_rate_limiter_enable(i, 1); */
+/*   } */
 
   //Enable the packet generator hardware to send the packets
   int drop = 0;
   if (!nf_pktgen.nodrop) { // in case we are not capturing on some queue, don't drop packets
     for (i = 0; i < NUM_PORTS; i++) 
-      if (nf_pktgen.obj_cap[i].cap_fd != -1) {
-	printf("receive data on port %d\n", i);
+      if (nf_pktgen.obj_cap[i].cap_fd == -1) {
+	printf("disable receipt on port %d\n", i);
 	drop |= (1 << i);
       }    
     drop <<= 8;
@@ -852,10 +869,10 @@ nf_start(int  wait) {
     }
   }
 
-#if DEBUG
+  //#if DEBUG
   //set to drop packets on queues that we don't receive data
   printf("droping mask: %x\n", drop | 0xF);
-#endif
+  //#endif
   packet_generator_enable (drop | 0xF);
   nf_pktgen.gen_start = time();
 
@@ -1078,7 +1095,7 @@ nf_cap_enable(char *dev_name, int caplen) {
   //allocate memory for the packet
   cap->caplen = caplen;
   cap->packet_cache = (uint8_t *)xmalloc(caplen);
-  if(cap->packet_cache) {
+  if(!cap->packet_cache) {
     return NULL;
   }
   
@@ -1102,27 +1119,30 @@ nf_cap_next(struct nf_cap_t *cap, struct pcap_pkthdr *h) {
   int len;
   uint64_t time_count;
 
-  if((cap == NULL) || (cap->cap_fd != 1)) {
-#if DEBUG
-    fprintf(stderr, "enable capturing first");
-#endif
+  if((cap == NULL) || (cap->cap_fd == 0)) {
+    fprintf(stderr, "enable capturing first\n");
     return NULL;
   }
 
   len = recv(cap->cap_fd, data, 2048, 0);
-  if(len <= 24) return NULL;
+  if(len <= 24) {
+    printf("received too small pakcet\n");
+    return NULL;
+  }
   h->len = len -24;
   len = (cap->caplen >= (len -24))? (len-24):cap->caplen;
   h->caplen = len;
   
   //set timestamp of packet
   memcpy(&time_count, data + 16, sizeof(uint64_t));
+  time_count = ntohll(time_count);
 
   lldiv_t res;
-  if(nf_pktgen.resolve_ns) 
-    res = lldiv(time_count, powl(10,9));
-  else
+  if(nf_pktgen.resolve_ns) {
     res = lldiv(time_count, powl(10,6));
+  }   else {
+    res = lldiv(time_count, powl(10,9));
+  }
     
   h->ts.tv_sec = (uint32_t) res.quot;
   h->ts.tv_usec = (uint32_t) res.rem;
