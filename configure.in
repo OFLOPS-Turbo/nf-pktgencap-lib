@@ -4,7 +4,6 @@ AC_INIT([netfpga-packet-generator-c-library], [0.01], [cr409@cl.cam.ac.uk])
 AM_INIT_AUTOMAKE([-Wall foreign])
 AC_CONFIG_SRCDIR([src])
 AC_CONFIG_HEADERS([config.h])
-AC_CONFIG_MACRO_DIR([m4])
 
 # Checks for programs.
 AC_PROG_CC
