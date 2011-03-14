@@ -1,5 +1,5 @@
-aclocal -I m4
+aclocal 
 autoheader
 autoconf
 automake --foreign --add-missing --copy
-autoreconf -I m4 --install --force 
+autoreconf --install --force 
