@@ -49,6 +49,7 @@ int nf_gen_rate_limiter_set(int port, int cpu, float rate);
 
 int nf_gen_wait_end();
 int nf_gen_finished();
+int nf_restart();
 
 struct nf_cap_t *nf_cap_enable(char *dev_name, int caplen);
 int  nf_cap_fileno(struct nf_cap_t *cap);

@@ -408,16 +408,12 @@ nf_gen_load_packet(struct pcap_pkthdr *h, const unsigned char *data, int port, i
   
     lldiv_t res;
     res = lldiv(delay, powl(2,32));
-    
-    printf("delay : %ld\n", delay);
     pointer = nf_pktgen.queue_data_len[port];
     nf_pktgen.queue_data_len[port] += 9;
     nf_pktgen.queue_data[port] = realloc(nf_pktgen.queue_data[port], nf_pktgen.queue_data_len[port]);
     nf_pktgen.queue_data[port][pointer] = DELAY_CTRL_VAL;
-    printf("div: %f, res : %ld\n", pow(2,32), res.quot);
     tmp_data =  ntohl((int32_t) res.quot);
     memcpy(nf_pktgen.queue_data[port] + pointer + 1,  &tmp_data, 4);
-    printf("div: %f, res : %ld\n", pow(2,32), res.rem);
     tmp_data = ntohl((int32_t)fmod(delay, pow(2, 32)));
     memcpy(nf_pktgen.queue_data[port] + pointer + 5,  &tmp_data, 4);
 #if DEBUG
@@ -887,6 +883,39 @@ nf_start(int  wait) {
     nf_gen_wait_end();
 }
 
+//////////////////////////////////////////////////////////////////
+// name: nf_restart
+// A function to load data and put the generator to start capturing data.
+// 
+/////////////////////////////////////////////////////////////////
+int
+nf_restart() {
+  //Enable the packet generator hardware to send the packets
+  int drop = 0, i;
+
+  //organize the queue sizes
+  queue_reorganize();
+
+  if (!nf_pktgen.nodrop) { // in case we are not capturing on some queue, don't drop packets
+    for (i = 0; i < NUM_PORTS; i++) 
+      if (nf_pktgen.obj_cap[i].cap_fd == -1) {
+	printf("disable receipt on port %d\n", i);
+	drop |= (1 << i);
+      }    
+    drop <<= 8;
+  }
+  
+  for (i = 0; i < NUM_PORTS;i++) {
+    if(nf_pktgen.iterations[i]) {
+      writeReg(&nf_pktgen.nf2, OQ_QUEUE_0_CTRL_REG+(i+2*NUM_PORTS)*nf_pktgen.queue_addr_offset, 
+	       0x1); 
+      writeReg(&nf_pktgen.nf2, OQ_QUEUE_0_MAX_ITER_REG+(i+2*NUM_PORTS)*nf_pktgen.queue_addr_offset, 
+	       nf_pktgen.iterations[i] );
+    }
+  }
+  nf_pktgen.gen_start = time();
+}
+
 int
 nf_finish() {
   // Disable the packet generator
@@ -937,7 +966,7 @@ nf_gen_wait_end() {
   // Wait the requesite number of seconds
   while (delta <= last_pkt) {
     printf("\r%1.3f seconds elapsed...\n", delta);
-    sleep(1);
+    pthread_yield();
     delta = ((double)time()) - nf_pktgen.gen_start;
   }  
 }
