@@ -1138,6 +1138,39 @@ nf_cap_fileno(struct nf_cap_t *cap) {
   else return -1;
 };
 
+/*
+ * The return pointer, point a memory location within the packet
+ */
+struct pktgen_hdr *
+nf_gen_extract_header(struct nf_cap_t *cap, uint8_t *b, int len) {
+  struct pktgen_hdr *ret;
+  uint64_t time_count;
+  lldiv_t res;
+
+  // sanity check 
+  if( (b == NULL) || (len < 80) || (cap->start.tv_sec == 0)) 
+    return NULL;
+  
+
+  //constant distacne
+  ret = (struct pktgen_hdr *)((uint8_t *)b + 64);
+  time_count =  (((uint64_t)ntohl(ret->tv_sec)) << 32) |  
+    ((0xFFFFFFFF) & ((uint64_t)ntohl(ret->tv_usec))); 
+  //  printf("packet time %lx %lx %llx\n", ntohl(ret->tv_sec), 
+  // ntohl(ret->tv_usec), time_count); 
+  res = lldiv(time_count, powl(10,9));
+  ret->tv_sec = cap->start.tv_sec + (uint32_t)res.quot;
+  ret->tv_usec = cap->start.tv_usec + ((uint32_t)(res.rem/1000));
+  if(ret->tv_usec >= 1000000) {
+    ret->tv_usec -= 1000000;
+    ret->tv_sec++;
+  }
+  ret->seq_num = ntohl(ret->seq_num);
+  //printf("packet time %lx %lx %lu.%06lu\n", ntohl(ret->magic), ntohl(ret->seq_num),
+  //	 ret->tv_sec, ret->tv_usec);
+  return ret;
+}
+
 const uint8_t *
 nf_cap_next(struct nf_cap_t *cap, struct pcap_pkthdr *h) {
   uint8_t *pcap_data;

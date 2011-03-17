@@ -11,12 +11,23 @@ struct nf_cap_stats {
   uint32_t pkt_cnt;
   uint32_t capture_packet_cnt;
   //double duration;
-  
 };
 
 struct nf_gen_stats {
   uint32_t pkt_snd_cnt;  
 };
+
+#ifndef PKTGEN_HDR
+
+#define PKTGEN_HDR 1
+struct pktgen_hdr {
+  uint32_t magic;
+  uint32_t seq_num;
+  uint32_t tv_sec;
+  uint32_t tv_usec;
+  struct timeval time;
+};
+#endif
 
 struct nf_cap_t;
 
