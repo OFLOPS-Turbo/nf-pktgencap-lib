@@ -11,12 +11,23 @@ struct nf_cap_stats {
   uint32_t pkt_cnt;
   uint32_t capture_packet_cnt;
   //double duration;
-  
 };
 
 struct nf_gen_stats {
   uint32_t pkt_snd_cnt;  
 };
+
+#ifndef PKTGEN_HDR
+
+#define PKTGEN_HDR 1
+struct pktgen_hdr {
+  uint32_t magic;
+  uint32_t seq_num;
+  uint32_t tv_sec;
+  uint32_t tv_usec;
+  struct timeval time;
+};
+#endif
 
 struct nf_cap_t;
 
@@ -38,6 +49,7 @@ int nf_gen_rate_limiter_set(int port, int cpu, float rate);
 
 int nf_gen_wait_end();
 int nf_gen_finished();
+int nf_restart();
 
 struct nf_cap_t *nf_cap_enable(char *dev_name, int caplen);
 int  nf_cap_fileno(struct nf_cap_t *cap);

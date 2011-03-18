@@ -24,12 +24,14 @@
 #include "reg_defines_packet_generator.h"
 
 struct nf_cap_t {
+  pcap_t * pcap_handle;
   int cap_fd;
   int intf_ix;
   char *name;
   struct pcap_pkthdr *cap_hdr;
   uint8_t *packet_cache;
   int caplen;
+  struct timeval start;
 };
 
 struct str_nf_pktgen {
@@ -45,9 +47,14 @@ struct str_nf_pktgen {
   char **queue_data;
   uint32_t *queue_data_len;
 
+  //rate limiter variables
   float *rate;
-  float *clks_between_tokens;
-  float *number_tokens;
+  uint8_t *rate_enable;
+  uint32_t *clks_between_tokens; // = 1;
+  float * number_tokens;
+
+/*   float *clks_between_tokens; */
+/*   float *number_tokens; */
   
   uint32_t *last_len;
   uint32_t *last_sec;
@@ -153,12 +160,19 @@ nf_init(int pad, int nodrop,int resolve_ns) {
   free(nf_pktgen.rate);
   nf_pktgen.rate = (float *)xmalloc(NUM_PORTS*sizeof(float));
   bzero(nf_pktgen.rate, NUM_PORTS*sizeof(float));
+
+  free(nf_pktgen.rate_enable);
+  nf_pktgen.rate_enable = (float *)xmalloc(NUM_PORTS*sizeof(float));
+  bzero(nf_pktgen.rate_enable, NUM_PORTS*sizeof(float));
+
   free(nf_pktgen.clks_between_tokens);
-  nf_pktgen.clks_between_tokens = (float *)xmalloc(NUM_PORTS*sizeof(float));
-  bzero(nf_pktgen.clks_between_tokens, NUM_PORTS*sizeof(float));
-  free(nf_pktgen.number_tokens);
+  nf_pktgen.clks_between_tokens = (uint32_t *)xmalloc(NUM_PORTS*sizeof(uint32_t));
+  bzero(nf_pktgen.clks_between_tokens, NUM_PORTS*sizeof(uint32_t));
+  for (i = 0; i < NUM_PORTS; i++) nf_pktgen.clks_between_tokens[i] = 1;
+  free(nf_pktgen.number_tokens);  
   nf_pktgen.number_tokens = (float *)xmalloc(NUM_PORTS*sizeof(float));
   bzero(nf_pktgen.number_tokens, NUM_PORTS*sizeof(float));
+  for (i = 0; i < NUM_PORTS; i++) nf_pktgen.number_tokens[i] = 1;
 
   free(nf_pktgen.last_len);
   nf_pktgen.last_len = (uint32_t *)xmalloc(NUM_PORTS*sizeof(uint32_t));
@@ -198,6 +212,8 @@ nf_init(int pad, int nodrop,int resolve_ns) {
     bzero(nf_pktgen.obj_cap[i].cap_hdr,sizeof(struct pcap_pkthdr));
     nf_pktgen.obj_cap[i].packet_cache = NULL;
     nf_pktgen.obj_cap[i].caplen = 0;
+    nf_pktgen.obj_cap[i].start.tv_sec = 0;
+    nf_pktgen.obj_cap[i].start.tv_usec = 0;
   }
 
   nf_pktgen.capture_enable = 0;
@@ -302,6 +318,12 @@ nf_gen_load_packet(struct pcap_pkthdr *h, const unsigned char *data, int port, i
   
   dst_port = (dst_port << port);
   
+
+  if(nf_pktgen.sec_current[port] == 0) {
+    nf_pktgen.sec_current[port] = h->ts.tv_sec;
+    nf_pktgen.usec_current[port] = h->ts.tv_usec;
+  }
+
   //If the delay is not specified assign based on the Pcap file
   if (delay == -1) {
     delay = sec - nf_pktgen.sec_current[port];
@@ -397,16 +419,12 @@ nf_gen_load_packet(struct pcap_pkthdr *h, const unsigned char *data, int port, i
   
     lldiv_t res;
     res = lldiv(delay, powl(2,32));
-    
-    printf("delay : %ld\n", delay);
     pointer = nf_pktgen.queue_data_len[port];
     nf_pktgen.queue_data_len[port] += 9;
     nf_pktgen.queue_data[port] = realloc(nf_pktgen.queue_data[port], nf_pktgen.queue_data_len[port]);
     nf_pktgen.queue_data[port][pointer] = DELAY_CTRL_VAL;
-    printf("div: %f, res : %ld\n", pow(2,32), res.quot);
     tmp_data =  ntohl((int32_t) res.quot);
     memcpy(nf_pktgen.queue_data[port] + pointer + 1,  &tmp_data, 4);
-    printf("div: %f, res : %ld\n", pow(2,32), res.rem);
     tmp_data = ntohl((int32_t)fmod(delay, pow(2, 32)));
     memcpy(nf_pktgen.queue_data[port] + pointer + 5,  &tmp_data, 4);
 #if DEBUG
@@ -489,6 +507,8 @@ nf_gen_load_packet(struct pcap_pkthdr *h, const unsigned char *data, int port, i
     nf_pktgen.final_pkt_delay[port] *= NSEC_PER_BYTE;
   }
 
+
+  nf_pktgen.num_pkts[port]++;
   return 0;
 }
 
@@ -523,14 +543,8 @@ nf_gen_load_pcap(const char *filename, int port, int32_t delay) {
     printf("load packet on queue %d, with delay %ld\n", 
 	   port, delay);
 #endif
-    if(nf_pktgen.sec_current[port] == 0) {
-      nf_pktgen.sec_current[port] = h.ts.tv_sec;
-      nf_pktgen.usec_current[port] = h.ts.tv_usec;
-    }
 
-    if(nf_gen_load_packet(&h, data, port, delay) == 0) 
-      nf_pktgen.num_pkts[port]++;
-    else
+    if(nf_gen_load_packet(&h, data, port, delay) != 0)
       break;
   }
 
@@ -552,10 +566,10 @@ nf_gen_set_number_iterations(int number_iterations, int iterations_enable, int q
 
   if((queue >=0) && (queue < NUM_PORTS)) {
     
-      writeReg(&nf_pktgen.nf2, OQ_QUEUE_0_CTRL_REG+(queue+2*NUM_PORTS)*nf_pktgen.queue_addr_offset, 
-	       0x1); 
-      writeReg(&nf_pktgen.nf2, OQ_QUEUE_0_MAX_ITER_REG+(queue+2*NUM_PORTS)*nf_pktgen.queue_addr_offset, 
-	        number_iterations );
+/*       writeReg(&nf_pktgen.nf2, OQ_QUEUE_0_CTRL_REG+(queue+2*NUM_PORTS)*nf_pktgen.queue_addr_offset,  */
+/* 	       0x1);  */
+/*       writeReg(&nf_pktgen.nf2, OQ_QUEUE_0_MAX_ITER_REG+(queue+2*NUM_PORTS)*nf_pktgen.queue_addr_offset,  */
+/* 	        number_iterations ); */
     nf_pktgen.iterations[queue] = number_iterations;
   }
    return 1;
@@ -570,7 +584,10 @@ int
 nf_gen_rate_limiter_enable(int port, int cpu) {
   uint32_t rate_limit_offset = RATE_LIMIT_1_CTRL_REG - RATE_LIMIT_0_CTRL_REG;
   int queue = 2*port + cpu;
-  return writeReg(&nf_pktgen.nf2, RATE_LIMIT_0_CTRL_REG+(queue*rate_limit_offset), 0x1);
+  if(!cpu) 
+    nf_pktgen.rate_enable[port] = 1;
+
+  //return writeReg(&nf_pktgen.nf2, RATE_LIMIT_0_CTRL_REG+(queue*rate_limit_offset), 0x1);
 }
 
 //////////////////////////////////////////////////////////////
@@ -637,13 +654,16 @@ nf_gen_rate_limiter_set(int port, int cpu, float rate) {
   printf("clks = %d)\n", clks_between_tokens);
   
   int rate_limit_offset = RATE_LIMIT_1_CTRL_REG - RATE_LIMIT_0_CTRL_REG;
-  
-  writeReg(&nf_pktgen.nf2, RATE_LIMIT_0_TOKEN_INTERVAL_REG + (queue * rate_limit_offset), clks_between_tokens);
-  writeReg(&nf_pktgen.nf2, RATE_LIMIT_0_TOKEN_INC_REG + (queue * rate_limit_offset), number_tokens);
-  
+ 
   if(!cpu) {
     nf_pktgen.clks_between_tokens[port] = clks_between_tokens;
     nf_pktgen.number_tokens[port] = number_tokens;
+  } else {
+    writeReg(&nf_pktgen.nf2, RATE_LIMIT_0_TOKEN_INTERVAL_REG + (queue * rate_limit_offset), 
+	     clks_between_tokens);
+  writeReg(&nf_pktgen.nf2, RATE_LIMIT_0_TOKEN_INC_REG + (queue * rate_limit_offset), 
+	   number_tokens);
+  
   }
   
   return 1;
@@ -658,10 +678,13 @@ int
 nf_gen_rate_limiter_disable(int port, int cpu) {
   int queue = 2*port + cpu;
   uint32_t rate_limit_offset = RATE_LIMIT_1_CTRL_REG - RATE_LIMIT_0_CTRL_REG;
+  if(!cpu) 
+    nf_pktgen.rate_enable[port] = 0;
   printf("rate limiter port %d%08x\n", port, RATE_LIMIT_0_CTRL_REG+(queue*rate_limit_offset));
-   return writeReg(&nf_pktgen.nf2, 
-		   RATE_LIMIT_0_CTRL_REG+(queue*rate_limit_offset), 0x0);
-   //return 0;
+  return 0;
+/*    return writeReg(&nf_pktgen.nf2,  */
+/* 		   RATE_LIMIT_0_CTRL_REG+(queue*rate_limit_offset), 0x0); */
+/*    //return 0; */
 }
 
 ///////////////////////////////////////////////////
@@ -830,7 +853,21 @@ time() {
 /////////////////////////////////////////////////////////////////
 int
 nf_start(int  wait) {
-  int i;
+  int i, queue;
+  int rate_limit_offset = RATE_LIMIT_1_CTRL_REG - RATE_LIMIT_0_CTRL_REG;
+
+  for (i = 0; i < NUM_PORTS;i++) {    
+    int rate_limit_offset = RATE_LIMIT_1_CTRL_REG - RATE_LIMIT_0_CTRL_REG;
+    int queue = 2*i;
+    if( nf_pktgen.rate_enable[i]) {
+      writeReg(&nf_pktgen.nf2, RATE_LIMIT_0_TOKEN_INTERVAL_REG + (queue * rate_limit_offset), 
+	       nf_pktgen.clks_between_tokens[i]);
+      writeReg(&nf_pktgen.nf2, RATE_LIMIT_0_TOKEN_INC_REG + (queue * rate_limit_offset), 
+	       nf_pktgen.number_tokens[i]);
+    }
+
+    nf_gen_rate_limiter_set(i,1, 200000.0);
+  }
 
   //organize the queue sizes
   queue_reorganize();
@@ -860,15 +897,26 @@ nf_start(int  wait) {
     drop <<= 8;
   }
 
-  for (i = 0; i < NUM_PORTS;i++) {
+  for (i = 0; i < NUM_PORTS;i++) {    
+    queue = 2*i;
     if(nf_pktgen.iterations[i]) {
-      writeReg(&nf_pktgen.nf2, OQ_QUEUE_0_CTRL_REG+(i+2*NUM_PORTS)*nf_pktgen.queue_addr_offset, 
+      writeReg(&nf_pktgen.nf2, OQ_QUEUE_0_CTRL_REG+(i+2*NUM_PORTS)*nf_pktgen.queue_addr_offset,
 	       0x1); 
       writeReg(&nf_pktgen.nf2, OQ_QUEUE_0_MAX_ITER_REG+(i+2*NUM_PORTS)*nf_pktgen.queue_addr_offset, 
 	       nf_pktgen.iterations[i] );
     }
+    if( nf_pktgen.rate_enable[i]) {
+      writeReg(&nf_pktgen.nf2, RATE_LIMIT_0_CTRL_REG+(queue*rate_limit_offset), 0x1);
+    } else {
+      writeReg(&nf_pktgen.nf2, RATE_LIMIT_0_CTRL_REG+(queue*rate_limit_offset), 0x0);
+    } 
   }
-
+  
+  
+  for (i = 0; i < NUM_PORTS;i++) {
+    queue = 2*i + 1;
+    writeReg(&nf_pktgen.nf2, RATE_LIMIT_0_CTRL_REG+(queue*rate_limit_offset), 0x1);
+  }
   //#if DEBUG
   //set to drop packets on queues that we don't receive data
   printf("droping mask: %x\n", drop | 0xF);
@@ -878,6 +926,39 @@ nf_start(int  wait) {
 
   if(wait) 
     nf_gen_wait_end();
+}
+
+//////////////////////////////////////////////////////////////////
+// name: nf_restart
+// A function to load data and put the generator to start capturing data.
+// 
+/////////////////////////////////////////////////////////////////
+int
+nf_restart() {
+  //Enable the packet generator hardware to send the packets
+  int drop = 0, i;
+
+  //organize the queue sizes
+  queue_reorganize();
+
+  if (!nf_pktgen.nodrop) { // in case we are not capturing on some queue, don't drop packets
+    for (i = 0; i < NUM_PORTS; i++) 
+      if (nf_pktgen.obj_cap[i].cap_fd == -1) {
+	printf("disable receipt on port %d\n", i);
+	drop |= (1 << i);
+      }    
+    drop <<= 8;
+  }
+  
+  for (i = 0; i < NUM_PORTS;i++) {
+    if(nf_pktgen.iterations[i]) {
+      writeReg(&nf_pktgen.nf2, OQ_QUEUE_0_CTRL_REG+(i+2*NUM_PORTS)*nf_pktgen.queue_addr_offset, 
+	       0x1); 
+      writeReg(&nf_pktgen.nf2, OQ_QUEUE_0_MAX_ITER_REG+(i+2*NUM_PORTS)*nf_pktgen.queue_addr_offset, 
+	       nf_pktgen.iterations[i] );
+    }
+  }
+  nf_pktgen.gen_start = time();
 }
 
 int
@@ -913,7 +994,7 @@ nf_gen_wait_end() {
   for (i = 0; i < NUM_PORTS; i++) {
     if (nf_pktgen.queue_data_len[i]) {
       double queue_last = ((double)nf_pktgen.last_sec[i]) + 
-	((double)nf_pktgen.last_nsec[i] * pow(10,-9));
+	((double)nf_pktgen.last_nsec[i] * pow(10,-9)) ; //+ pow(10,9);
       queue_last = queue_last *((double)nf_pktgen.iterations[i]);
       queue_last += (nf_pktgen.final_pkt_delay[i] * pow(10, -9)) * 
       	(nf_pktgen.iterations[i] - 1.0);
@@ -930,7 +1011,7 @@ nf_gen_wait_end() {
   // Wait the requesite number of seconds
   while (delta <= last_pkt) {
     printf("\r%1.3f seconds elapsed...\n", delta);
-    sleep(1);
+    pthread_yield();
     delta = ((double)time()) - nf_pktgen.gen_start;
   }  
 }
@@ -1043,6 +1124,7 @@ nf_cap_enable(char *dev_name, int caplen) {
   struct ifreq ifr;
   int ix;
   struct nf_cap_t *cap;
+  char errbuf[PCAP_ERRBUF_SIZE];
   
   //check data
   if((!dev_name) || (caplen <= 0) ) {
@@ -1060,37 +1142,52 @@ nf_cap_enable(char *dev_name, int caplen) {
   } else 
     cap = &nf_pktgen.obj_cap[ix];
 
-  //open fd
-  cap->cap_fd = socket(PF_PACKET, SOCK_RAW, ETH_P_ALL);
-  if(cap->cap_fd == -1) {
-    perror("socket():");
-    return NULL;
+  cap->pcap_handle = pcap_open_live(dev_name, caplen,
+				    1, 	    // promisc
+				    0, 	    // read timeout (ms)
+				    errbuf);// for error messages
+
+  if(!cap->pcap_handle) {
+    fprintf( stderr, "pcap_open_live failed: %s\n",errbuf);
+    exit(1);
   }
+  
+  
+  if(pcap_setnonblock(cap->pcap_handle, 1, errbuf))
+    fprintf(stderr,"setup_channel: pcap_setnonblock(): %s\n",errbuf);
+  cap->cap_fd = pcap_get_selectable_fd(cap->pcap_handle);
+
+  //open fd
+/*   cap->cap_fd = socket(PF_PACKET, SOCK_RAW, ETH_P_ALL); */
+/*   if(cap->cap_fd == -1) { */
+/*     perror("socket():"); */
+/*     return NULL; */
+/*   } */
 
   //TODO: check if capturing has started and warn
 
-  //retrieve ethernet interface index
-  strncpy(ifr.ifr_name, dev_name, IFNAMSIZ);
-  if (ioctl(cap->cap_fd, SIOCGIFINDEX, &ifr) == -1) {
-    perror("SIOCGIFINDEX");
-    return NULL;
-  }
+/*   //retrieve ethernet interface index */
+/*   strncpy(ifr.ifr_name, dev_name, IFNAMSIZ); */
+/*   if (ioctl(cap->cap_fd, SIOCGIFINDEX, &ifr) == -1) { */
+/*     perror("SIOCGIFINDEX"); */
+/*     return NULL; */
+/*   } */
 
-  sockaddr.sll_family = AF_PACKET; /* Always AF_PACKET */
-  sockaddr.sll_protocol =  htons(ETH_P_ALL); /* Physical layer protocol */
-  sockaddr.sll_ifindex =  ifr.ifr_ifindex; /* Interface number */
+/*   sockaddr.sll_family = AF_PACKET; /\* Always AF_PACKET *\/ */
+/*   sockaddr.sll_protocol =  htons(ETH_P_ALL); /\* Physical layer protocol *\/ */
+/*   sockaddr.sll_ifindex =  ifr.ifr_ifindex; /\* Interface number *\/ */
 
-  //bind interface to the socket
-  if( bind(cap->cap_fd, (struct sockaddr*)&sockaddr,sizeof(sockaddr)) == -1) {
-    printf("Error 20008\nCould not bind Socket to Device!");
-    return NULL;
-  }
+/*   //bind interface to the socket */
+/*   if( bind(cap->cap_fd, (struct sockaddr*)&sockaddr,sizeof(sockaddr)) == -1) { */
+/*     printf("Error 20008\nCould not bind Socket to Device!"); */
+/*     return NULL; */
+/*   } */
 
-  //set it in promiscuous mode
-  strncpy(ifr.ifr_name, dev_name, 16);
-  ioctl(cap->cap_fd,SIOCGIFFLAGS,&ifr);
-  ifr.ifr_flags |= IFF_PROMISC;
-  ioctl(cap->cap_fd, SIOCSIFFLAGS, &ifr);
+/*   //set it in promiscuous mode */
+/*   strncpy(ifr.ifr_name, dev_name, 16); */
+/*   ioctl(cap->cap_fd,SIOCGIFFLAGS,&ifr); */
+/*   ifr.ifr_flags |= IFF_PROMISC; */
+/*   ioctl(cap->cap_fd, SIOCSIFFLAGS, &ifr); */
 
   //allocate memory for the packet
   cap->caplen = caplen;
@@ -1099,6 +1196,8 @@ nf_cap_enable(char *dev_name, int caplen) {
     return NULL;
   }
   
+
+  printf("XXXXXXXXXXXXXXXXXXXXXXX nf_cap_enable XXXXXXXXXXXXXXXXXXXXXXX\n");
   return cap;
 };
 
@@ -1113,42 +1212,92 @@ nf_cap_fileno(struct nf_cap_t *cap) {
   else return -1;
 };
 
+/*
+ * The return pointer, point a memory location within the packet
+ */
+struct pktgen_hdr *
+nf_gen_extract_header(struct nf_cap_t *cap, uint8_t *b, int len) {
+  struct pktgen_hdr *ret;
+  uint64_t time_count;
+  lldiv_t res;
+
+  // sanity check 
+  if( (b == NULL) || (len < 80) || (cap->start.tv_sec == 0)) 
+    return NULL;
+  
+
+  //constant distacne
+  ret = (struct pktgen_hdr *)((uint8_t *)b + 64);
+  time_count =  (((uint64_t)ntohl(ret->tv_sec)) << 32) |  
+    ((0xFFFFFFFF) & ((uint64_t)ntohl(ret->tv_usec))); 
+  //  printf("packet time %lx %lx %llx\n", ntohl(ret->tv_sec), 
+  // ntohl(ret->tv_usec), time_count); 
+  res = lldiv(time_count, powl(10,9));
+  ret->tv_sec = cap->start.tv_sec + (uint32_t)res.quot;
+  ret->tv_usec = cap->start.tv_usec + ((uint32_t)(res.rem/1000));
+  if(ret->tv_usec >= 1000000) {
+    ret->tv_usec -= 1000000;
+    ret->tv_sec++;
+  }
+  ret->seq_num = ntohl(ret->seq_num);
+  //printf("packet time %lx %lx %lu.%06lu\n", ntohl(ret->magic), ntohl(ret->seq_num),
+  //	 ret->tv_sec, ret->tv_usec);
+  return ret;
+}
+
 const uint8_t *
 nf_cap_next(struct nf_cap_t *cap, struct pcap_pkthdr *h) {
-  uint8_t data[2048];
-  int len;
+  uint8_t *pcap_data;
+  int len = 0;
   uint64_t time_count;
+  lldiv_t res;
 
-  if((cap == NULL) || (cap->cap_fd == 0)) {
+  if((cap == NULL) || (cap->pcap_handle == NULL)) {
     fprintf(stderr, "enable capturing first\n");
     return NULL;
   }
-
-  len = recv(cap->cap_fd, data, 2048, 0);
-  if(len <= 24) {
-    printf("received too small pakcet\n");
+  
+  pcap_data = pcap_next(cap->pcap_handle, h);
+  //  len = recv(cap->cap_fd, data, 2048, 0);
+  if(h->len <= 24) {
+    dprintf(stderr, "received too small pakcet");
     return NULL;
   }
-  h->len = len -24;
-  len = (cap->caplen >= (len -24))? (len-24):cap->caplen;
-  h->caplen = len;
+
+  h->len = h->len -24;
+  len = (cap->caplen >= (h->len -24))? (h->len-24):cap->caplen;
+  h->caplen = h->len;
   
   //set timestamp of packet
-  memcpy(&time_count, data + 16, sizeof(uint64_t));
+  memcpy(&time_count, pcap_data + 16, sizeof(uint64_t));
   time_count = ntohll(time_count);
 
-  lldiv_t res;
   if(nf_pktgen.resolve_ns) {
     res = lldiv(time_count, powl(10,6));
   }   else {
     res = lldiv(time_count, powl(10,9));
   }
-    
-  h->ts.tv_sec = (uint32_t) res.quot;
-  h->ts.tv_usec = (uint32_t) res.rem;
+
+
+  if((cap->start.tv_sec == 0) && (res.quot < 48*60*60)) {     
+    cap->start.tv_sec = h->ts.tv_sec - res.quot;
+    if(h->ts.tv_usec < (res.rem/1000)) {
+      cap->start.tv_usec = (1000000 + h->ts.tv_usec) - (res.rem/1000);
+      cap->start.tv_sec--;
+    } else
+      cap->start.tv_usec = h->ts.tv_usec - (uint32_t)(res.rem/1000);
+  } else if(cap->start.tv_sec > 0) {
+    h->ts.tv_sec = cap->start.tv_sec + (uint32_t)res.quot;
+    h->ts.tv_usec = cap->start.tv_usec + ((uint32_t)(res.rem/1000));
+    if(h->ts.tv_usec >= 1000000) {
+      h->ts.tv_usec -= 1000000;
+      h->ts.tv_sec++;
+    }
+  }
 
   //return data
-  memcpy(cap->packet_cache, data + 24, len);
+  //  printf("%d %d %d", cap->caplen, len - 24, , );
+  memcpy(cap->packet_cache, pcap_data + 24, len);
 
   return cap->packet_cache;
 }
