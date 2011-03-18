@@ -47,9 +47,14 @@ struct str_nf_pktgen {
   char **queue_data;
   uint32_t *queue_data_len;
 
+  //rate limiter variables
   float *rate;
-  float *clks_between_tokens;
-  float *number_tokens;
+  uint8_t *rate_enable;
+  uint32_t *clks_between_tokens; // = 1;
+  float * number_tokens;
+
+/*   float *clks_between_tokens; */
+/*   float *number_tokens; */
   
   uint32_t *last_len;
   uint32_t *last_sec;
@@ -155,13 +160,19 @@ nf_init(int pad, int nodrop,int resolve_ns) {
   free(nf_pktgen.rate);
   nf_pktgen.rate = (float *)xmalloc(NUM_PORTS*sizeof(float));
   bzero(nf_pktgen.rate, NUM_PORTS*sizeof(float));
-  free(nf_pktgen.clks_between_tokens);
-  nf_pktgen.clks_between_tokens = (float *)xmalloc(NUM_PORTS*sizeof(float));
-  bzero(nf_pktgen.clks_between_tokens, NUM_PORTS*sizeof(float));
-  free(nf_pktgen.number_tokens);  
 
+  free(nf_pktgen.rate_enable);
+  nf_pktgen.rate_enable = (float *)xmalloc(NUM_PORTS*sizeof(float));
+  bzero(nf_pktgen.rate_enable, NUM_PORTS*sizeof(float));
+
+  free(nf_pktgen.clks_between_tokens);
+  nf_pktgen.clks_between_tokens = (uint32_t *)xmalloc(NUM_PORTS*sizeof(uint32_t));
+  bzero(nf_pktgen.clks_between_tokens, NUM_PORTS*sizeof(uint32_t));
+  for (i = 0; i < NUM_PORTS; i++) nf_pktgen.clks_between_tokens[i] = 1;
+  free(nf_pktgen.number_tokens);  
   nf_pktgen.number_tokens = (float *)xmalloc(NUM_PORTS*sizeof(float));
   bzero(nf_pktgen.number_tokens, NUM_PORTS*sizeof(float));
+  for (i = 0; i < NUM_PORTS; i++) nf_pktgen.number_tokens[i] = 1;
 
   free(nf_pktgen.last_len);
   nf_pktgen.last_len = (uint32_t *)xmalloc(NUM_PORTS*sizeof(uint32_t));
@@ -555,10 +566,10 @@ nf_gen_set_number_iterations(int number_iterations, int iterations_enable, int q
 
   if((queue >=0) && (queue < NUM_PORTS)) {
     
-      writeReg(&nf_pktgen.nf2, OQ_QUEUE_0_CTRL_REG+(queue+2*NUM_PORTS)*nf_pktgen.queue_addr_offset, 
-	       0x1); 
-      writeReg(&nf_pktgen.nf2, OQ_QUEUE_0_MAX_ITER_REG+(queue+2*NUM_PORTS)*nf_pktgen.queue_addr_offset, 
-	        number_iterations );
+/*       writeReg(&nf_pktgen.nf2, OQ_QUEUE_0_CTRL_REG+(queue+2*NUM_PORTS)*nf_pktgen.queue_addr_offset,  */
+/* 	       0x1);  */
+/*       writeReg(&nf_pktgen.nf2, OQ_QUEUE_0_MAX_ITER_REG+(queue+2*NUM_PORTS)*nf_pktgen.queue_addr_offset,  */
+/* 	        number_iterations ); */
     nf_pktgen.iterations[queue] = number_iterations;
   }
    return 1;
@@ -573,7 +584,10 @@ int
 nf_gen_rate_limiter_enable(int port, int cpu) {
   uint32_t rate_limit_offset = RATE_LIMIT_1_CTRL_REG - RATE_LIMIT_0_CTRL_REG;
   int queue = 2*port + cpu;
-  return writeReg(&nf_pktgen.nf2, RATE_LIMIT_0_CTRL_REG+(queue*rate_limit_offset), 0x1);
+  if(!cpu) 
+    nf_pktgen.rate_enable[port] = 1;
+
+  //return writeReg(&nf_pktgen.nf2, RATE_LIMIT_0_CTRL_REG+(queue*rate_limit_offset), 0x1);
 }
 
 //////////////////////////////////////////////////////////////
@@ -640,13 +654,16 @@ nf_gen_rate_limiter_set(int port, int cpu, float rate) {
   printf("clks = %d)\n", clks_between_tokens);
   
   int rate_limit_offset = RATE_LIMIT_1_CTRL_REG - RATE_LIMIT_0_CTRL_REG;
-  
-  writeReg(&nf_pktgen.nf2, RATE_LIMIT_0_TOKEN_INTERVAL_REG + (queue * rate_limit_offset), clks_between_tokens);
-  writeReg(&nf_pktgen.nf2, RATE_LIMIT_0_TOKEN_INC_REG + (queue * rate_limit_offset), number_tokens);
-  
+ 
   if(!cpu) {
     nf_pktgen.clks_between_tokens[port] = clks_between_tokens;
     nf_pktgen.number_tokens[port] = number_tokens;
+  } else {
+    writeReg(&nf_pktgen.nf2, RATE_LIMIT_0_TOKEN_INTERVAL_REG + (queue * rate_limit_offset), 
+	     clks_between_tokens);
+  writeReg(&nf_pktgen.nf2, RATE_LIMIT_0_TOKEN_INC_REG + (queue * rate_limit_offset), 
+	   number_tokens);
+  
   }
   
   return 1;
@@ -661,10 +678,13 @@ int
 nf_gen_rate_limiter_disable(int port, int cpu) {
   int queue = 2*port + cpu;
   uint32_t rate_limit_offset = RATE_LIMIT_1_CTRL_REG - RATE_LIMIT_0_CTRL_REG;
+  if(!cpu) 
+    nf_pktgen.rate_enable[port] = 0;
   printf("rate limiter port %d%08x\n", port, RATE_LIMIT_0_CTRL_REG+(queue*rate_limit_offset));
-   return writeReg(&nf_pktgen.nf2, 
-		   RATE_LIMIT_0_CTRL_REG+(queue*rate_limit_offset), 0x0);
-   //return 0;
+  return 0;
+/*    return writeReg(&nf_pktgen.nf2,  */
+/* 		   RATE_LIMIT_0_CTRL_REG+(queue*rate_limit_offset), 0x0); */
+/*    //return 0; */
 }
 
 ///////////////////////////////////////////////////
@@ -833,7 +853,21 @@ time() {
 /////////////////////////////////////////////////////////////////
 int
 nf_start(int  wait) {
-  int i;
+  int i, queue;
+  int rate_limit_offset = RATE_LIMIT_1_CTRL_REG - RATE_LIMIT_0_CTRL_REG;
+
+  for (i = 0; i < NUM_PORTS;i++) {    
+    int rate_limit_offset = RATE_LIMIT_1_CTRL_REG - RATE_LIMIT_0_CTRL_REG;
+    int queue = 2*i;
+    if( nf_pktgen.rate_enable[i]) {
+      writeReg(&nf_pktgen.nf2, RATE_LIMIT_0_TOKEN_INTERVAL_REG + (queue * rate_limit_offset), 
+	       nf_pktgen.clks_between_tokens[i]);
+      writeReg(&nf_pktgen.nf2, RATE_LIMIT_0_TOKEN_INC_REG + (queue * rate_limit_offset), 
+	       nf_pktgen.number_tokens[i]);
+    }
+
+    nf_gen_rate_limiter_set(i,1, 200000.0);
+  }
 
   //organize the queue sizes
   queue_reorganize();
@@ -863,15 +897,26 @@ nf_start(int  wait) {
     drop <<= 8;
   }
 
-  for (i = 0; i < NUM_PORTS;i++) {
+  for (i = 0; i < NUM_PORTS;i++) {    
+    queue = 2*i;
     if(nf_pktgen.iterations[i]) {
-      writeReg(&nf_pktgen.nf2, OQ_QUEUE_0_CTRL_REG+(i+2*NUM_PORTS)*nf_pktgen.queue_addr_offset, 
+      writeReg(&nf_pktgen.nf2, OQ_QUEUE_0_CTRL_REG+(i+2*NUM_PORTS)*nf_pktgen.queue_addr_offset,
 	       0x1); 
       writeReg(&nf_pktgen.nf2, OQ_QUEUE_0_MAX_ITER_REG+(i+2*NUM_PORTS)*nf_pktgen.queue_addr_offset, 
 	       nf_pktgen.iterations[i] );
     }
+    if( nf_pktgen.rate_enable[i]) {
+      writeReg(&nf_pktgen.nf2, RATE_LIMIT_0_CTRL_REG+(queue*rate_limit_offset), 0x1);
+    } else {
+      writeReg(&nf_pktgen.nf2, RATE_LIMIT_0_CTRL_REG+(queue*rate_limit_offset), 0x0);
+    } 
   }
-
+  
+  
+  for (i = 0; i < NUM_PORTS;i++) {
+    queue = 2*i + 1;
+    writeReg(&nf_pktgen.nf2, RATE_LIMIT_0_CTRL_REG+(queue*rate_limit_offset), 0x1);
+  }
   //#if DEBUG
   //set to drop packets on queues that we don't receive data
   printf("droping mask: %x\n", drop | 0xF);
