@@ -32,6 +32,7 @@ struct nf_cap_t {
   uint8_t *packet_cache;
   int caplen;
   struct timeval start;
+  uint32_t pkt_count;
 };
 
 struct str_nf_pktgen {
@@ -214,6 +215,7 @@ nf_init(int pad, int nodrop,int resolve_ns) {
     nf_pktgen.obj_cap[i].caplen = 0;
     nf_pktgen.obj_cap[i].start.tv_sec = 0;
     nf_pktgen.obj_cap[i].start.tv_usec = 0;
+    nf_pktgen.obj_cap[i].pkt_count = 0;
   }
 
   nf_pktgen.capture_enable = 0;
@@ -346,8 +348,8 @@ nf_gen_load_packet(struct pcap_pkthdr *h, const unsigned char *data, int port, i
   if ( (packet_words + nf_pktgen.total_words) > MAX_TX_QUEUE_SIZE) {
     printf("Warning: unable to load all packets from pcap file. SRAM queues are full.\n");
     printf("Total output queue size: %d words\n",MAX_TX_QUEUE_SIZE);
-    printf("Current queue occupancy: %lu words\n", nf_pktgen.total_words);
-    printf("Packet size:%lu words\n", packet_words);
+    printf("Current queue occupancy: %d words\n", nf_pktgen.total_words);
+    printf("Packet size:%d words\n", packet_words);
     return 0;
   } else {
     nf_pktgen.total_words += packet_words;
@@ -1064,6 +1066,7 @@ nf_cap_stat(int queue, struct nf_cap_stats *stat) {
   readReg(&nf_pktgen.nf2, PKT_GEN_CTRL_0_BYTE_COUNT_LO_REG+offset, &byte_cnt_lo);
 
   stat->byte_cnt = ((uint64_t)byte_cnt_hi)*pow(2,32) + (byte_cnt_lo);
+  stat->capture_packet_cnt = nf_pktgen.obj_cap[queue].pkt_count;
 /*   readReg(nf_pktgen.nf2, PKT_GEN_CTRL_0_TIME_FIRST_HI_REG+offset, &time_first_hi); */
 /*   readReg(nf_pktgen.nf2, PKT_GEN_CTRL_0_TIME_FIRST_LO_REG+offset, &time_first_lo); */
   
@@ -1222,7 +1225,7 @@ nf_gen_extract_header(struct nf_cap_t *cap, uint8_t *b, int len) {
   lldiv_t res;
 
   // sanity check 
-  if( (b == NULL) || (len < 80) || (cap->start.tv_sec == 0)) 
+  if( (b == NULL) || (len < 90) || (cap->start.tv_sec == 0)) 
     return NULL;
   
 
@@ -1298,6 +1301,6 @@ nf_cap_next(struct nf_cap_t *cap, struct pcap_pkthdr *h) {
   //return data
   //  printf("%d %d %d", cap->caplen, len - 24, , );
   memcpy(cap->packet_cache, pcap_data + 24, len);
-
+  cap->pkt_count++;
   return cap->packet_cache;
 }
