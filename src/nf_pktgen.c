@@ -300,6 +300,28 @@ load_queues(int queue) {
   }
   return 0;
 }
+////////////////////////////////////////////////////////////
+// Name: nf_gen_reset_queue
+// CLeanup all the structures storing data for the packet generator
+// Arguments: port             The number of the port we want to output the packet
+////////////////////////////////////////////////////////////
+int
+nf_gen_reset_queue(int port) {
+  nf_pktgen.sec_current[port] = 0;
+  nf_pktgen.usec_current[port] = 0;
+  nf_pktgen.last_nsec[port] = 0;
+  nf_pktgen.last_len[port] = 0;
+  nf_pktgen.final_pkt_delay[port] = 0;
+  nf_pktgen.num_pkts[port] = 0;
+  nf_pktgen.queue_words[port] = 0;
+  nf_pktgen.queue_bytes[port] = 0;
+  nf_pktgen.last_len[port] = 0;
+  if(nf_pktgen.queue_data_len[port] > 0) {
+    free( nf_pktgen.queue_data[port]);
+    nf_pktgen.queue_data[port] = NULL;
+  }
+  nf_pktgen.queue_data_len[port] = 0;
+}
 
 ////////////////////////////////////////////////////////////
 // Name: load_packet

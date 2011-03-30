@@ -38,6 +38,7 @@ int nf_init();
 int nf_gen_load_pcap(const char *filename, int port, int32_t delay);
 int nf_gen_load_packet(struct pcap_pkthdr *h, const unsigned char *data, 
 		       int port, int32_t delay);
+int nf_gen_reset_queue(int port);
 
 int nf_gen_set_number_iterations(int number_iterations, int iterations_enable, 
 			  int queue);
