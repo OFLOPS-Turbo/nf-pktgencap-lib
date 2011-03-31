@@ -1231,6 +1231,15 @@ nf_gen_extract_header(struct nf_cap_t *cap, uint8_t *b, int len) {
 
   //constant distacne
   ret = (struct pktgen_hdr *)((uint8_t *)b + 64);
+
+  if((0xFFFFFF & ntohl(ret->magic)) != 0x9be955) { //simetimes the 1st byte is messed up
+    //if the vlan tag is stripped move the translation by 4 bytes.
+    ret = (struct pktgen_hdr *)((uint8_t *)b + 60); 
+    if((0xFFFFFF & ntohl(ret->magic)) != 0x9be955) 
+      return NULL;
+  
+  }
+
   time_count =  (((uint64_t)ntohl(ret->tv_sec)) << 32) |  
     ((0xFFFFFFFF) & ((uint64_t)ntohl(ret->tv_usec))); 
   //  printf("packet time %lx %lx %llx\n", ntohl(ret->tv_sec), 
@@ -1242,6 +1251,7 @@ nf_gen_extract_header(struct nf_cap_t *cap, uint8_t *b, int len) {
     ret->tv_usec -= 1000000;
     ret->tv_sec++;
   }
+
   ret->seq_num = ntohl(ret->seq_num);
   //printf("packet time %lx %lx %lu.%06lu\n", ntohl(ret->magic), ntohl(ret->seq_num),
   //	 ret->tv_sec, ret->tv_usec);
