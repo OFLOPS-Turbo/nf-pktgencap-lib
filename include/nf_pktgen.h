@@ -29,6 +29,8 @@ struct pktgen_hdr {
 };
 #endif
 
+FILE *test_output;
+
 struct nf_cap_t;
 
 //a function to control the state of the design state

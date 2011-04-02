@@ -319,6 +319,8 @@ nf_gen_reset_queue(int port) {
     nf_pktgen.queue_data[port] = NULL;
   }
   nf_pktgen.queue_data_len[port] = 0;
+
+  bzero(&nf_pktgen.obj_cap[port].start, sizeof(struct timeval));
 }
 
 ////////////////////////////////////////////////////////////
@@ -1261,11 +1263,21 @@ nf_gen_extract_header(struct nf_cap_t *cap, uint8_t *b, int len) {
 
   time_count =  (((uint64_t)ntohl(ret->tv_sec)) << 32) |  
     ((0xFFFFFFFF) & ((uint64_t)ntohl(ret->tv_usec))); 
+
+ 
+  //printf("rcv %d %llu %llx\n",  ntohl(ret->seq_num), time_count, time_count);
   //  printf("packet time %lx %lx %llx\n", ntohl(ret->tv_sec), 
   // ntohl(ret->tv_usec), time_count); 
+
+  //minor hack in case I am comparing against timestamp not made by the hw design
   res = lldiv(time_count, powl(10,9));
-  ret->tv_sec = cap->start.tv_sec + (uint32_t)res.quot;
-  ret->tv_usec = cap->start.tv_usec + ((uint32_t)(res.rem/1000));
+  if((uint32_t)res.quot < (1<<26)) { 
+    ret->tv_sec = cap->start.tv_sec + (uint32_t)res.quot;
+    ret->tv_usec = cap->start.tv_usec + ((uint32_t)(res.rem/1000));
+  } else {
+    ret->tv_sec = (uint32_t)res.quot;
+    ret->tv_usec = ((uint32_t)(res.rem/1000));
+  }
   if(ret->tv_usec >= 1000000) {
     ret->tv_usec -= 1000000;
     ret->tv_sec++;
@@ -1283,6 +1295,9 @@ nf_cap_next(struct nf_cap_t *cap, struct pcap_pkthdr *h) {
   int len = 0;
   uint64_t time_count;
   lldiv_t res;
+  struct pcap_pkthdr old_header;
+  ldiv_t ldiv(long numerator, long denominator);
+
 
   if((cap == NULL) || (cap->pcap_handle == NULL)) {
     fprintf(stderr, "enable capturing first\n");
@@ -1292,7 +1307,7 @@ nf_cap_next(struct nf_cap_t *cap, struct pcap_pkthdr *h) {
   pcap_data = pcap_next(cap->pcap_handle, h);
   //  len = recv(cap->cap_fd, data, 2048, 0);
   if(h->len <= 24) {
-    dprintf(stderr, "received too small pakcet");
+    fprintf(stderr, "received too small pakcet");
     return NULL;
   }
 
@@ -1302,6 +1317,7 @@ nf_cap_next(struct nf_cap_t *cap, struct pcap_pkthdr *h) {
   
   //set timestamp of packet
   memcpy(&time_count, pcap_data + 16, sizeof(uint64_t));
+  memcpy(&old_header, h, sizeof(struct pcap_pkthdr));
   time_count = ntohll(time_count);
 
   if(nf_pktgen.resolve_ns) {
@@ -1310,14 +1326,14 @@ nf_cap_next(struct nf_cap_t *cap, struct pcap_pkthdr *h) {
     res = lldiv(time_count, powl(10,9));
   }
 
-
-  if((cap->start.tv_sec == 0) && (res.quot < 48*60*60)) {     
+  if((cap->start.tv_sec == 0) && (res.quot <  powl(10,6))) {   
     cap->start.tv_sec = h->ts.tv_sec - res.quot;
-    if(h->ts.tv_usec < (res.rem/1000)) {
-      cap->start.tv_usec = (1000000 + h->ts.tv_usec) - (res.rem/1000);
+    if(h->ts.tv_usec < (uint32_t)(res.rem/1000)) {
+      cap->start.tv_usec = (1000000 + h->ts.tv_usec) - (uint32_t)(res.rem/1000);
       cap->start.tv_sec--;
-    } else
+    } else {
       cap->start.tv_usec = h->ts.tv_usec - (uint32_t)(res.rem/1000);
+    }
   } else if(cap->start.tv_sec > 0) {
     h->ts.tv_sec = cap->start.tv_sec + (uint32_t)res.quot;
     h->ts.tv_usec = cap->start.tv_usec + ((uint32_t)(res.rem/1000));
@@ -1325,6 +1341,18 @@ nf_cap_next(struct nf_cap_t *cap, struct pcap_pkthdr *h) {
       h->ts.tv_usec -= 1000000;
       h->ts.tv_sec++;
     }
+  }
+
+  if(test_output) {
+    int32_t diff;
+    diff =  (h->ts.tv_sec - old_header.ts.tv_sec)*1000000 +
+       h->ts.tv_usec - old_header.ts.tv_usec;
+
+    fprintf(test_output, "%lu.%06lu %lu.%06lu %ld %llu %lu.%06lu %llu.%09llu\n",
+	    old_header.ts.tv_sec,old_header.ts.tv_usec, 
+	    h->ts.tv_sec, h->ts.tv_usec, diff,
+	    time_count, cap->start.tv_sec, cap->start.tv_usec,
+	    res.quot, res.rem);
   }
 
   //return data
