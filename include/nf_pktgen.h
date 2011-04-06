@@ -64,4 +64,7 @@ int nf_finish();
 int nf_gen_stat(int queue, struct nf_gen_stats *stat);
 int nf_cap_stat(int queue, struct nf_cap_stats *stat);
 
+
+void nf_cap_timeofday(struct timeval *now);
+
 #endif

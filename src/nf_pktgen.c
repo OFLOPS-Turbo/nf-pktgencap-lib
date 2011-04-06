@@ -31,7 +31,7 @@ struct nf_cap_t {
   struct pcap_pkthdr *cap_hdr;
   uint8_t *packet_cache;
   int caplen;
-  struct timeval start;
+  //struct timeval start;
 };
 
 struct str_nf_pktgen {
@@ -79,6 +79,8 @@ struct str_nf_pktgen {
   int queue_addr_offset;
   int gen_start;
 
+  struct timeval start;
+
   struct nf2device nf2;
 };
 
@@ -125,6 +127,10 @@ ntohll(uint64_t val) {
 int
 nf_init(int pad, int nodrop,int resolve_ns) {
   int i;
+
+  uint32_t counter_h, counter_l;
+  uint64_t timer;
+  lldiv_t res;
 
   printf("Initializing pkt gen library\n");
   free(nf_pktgen.queue_words);
@@ -212,8 +218,6 @@ nf_init(int pad, int nodrop,int resolve_ns) {
     bzero(nf_pktgen.obj_cap[i].cap_hdr,sizeof(struct pcap_pkthdr));
     nf_pktgen.obj_cap[i].packet_cache = NULL;
     nf_pktgen.obj_cap[i].caplen = 0;
-    nf_pktgen.obj_cap[i].start.tv_sec = 0;
-    nf_pktgen.obj_cap[i].start.tv_usec = 0;
   }
 
   nf_pktgen.capture_enable = 0;
@@ -239,6 +243,29 @@ nf_init(int pad, int nodrop,int resolve_ns) {
     perror("packet_generator_enable");
     exit(1);
   }
+  
+  writeReg(&nf_pktgen.nf2, COUNTER_READ_ENABLE_REG, 1);
+  gettimeofday(&nf_pktgen.start, NULL);
+  writeReg(&nf_pktgen.nf2, COUNTER_READ_ENABLE_REG, 0);
+  
+  readReg(&nf_pktgen.nf2, COUNTER_BIT_95_64_REG, &counter_h);
+  readReg(&nf_pktgen.nf2, COUNTER_BIT_63_32_REG, &counter_l);
+  timer = ((uint64_t)counter_h<<32) + (uint64_t)(0xFFFFFFFF&counter_l);
+  printf("counter: %llx %lx %lx\n", timer, counter_h, counter_l);
+
+  if(nf_pktgen.resolve_ns) {
+    res = lldiv(timer, powl(10,6));
+  }   else {
+    res = lldiv(timer, powl(10,9));
+  }
+
+  nf_pktgen.start.tv_sec -= res.quot;
+  if(nf_pktgen.start.tv_usec < (uint32_t)(res.rem/1000)) {
+    nf_pktgen.start.tv_sec--;
+    nf_pktgen.start.tv_usec += (1000000 - (uint32_t)(res.rem/1000));
+  } else 
+     nf_pktgen.start.tv_usec -= (uint32_t)(res.rem/1000);
+  
 }
 
 ////////////////////////////////////////////////////////////
@@ -320,7 +347,7 @@ nf_gen_reset_queue(int port) {
   }
   nf_pktgen.queue_data_len[port] = 0;
 
-  bzero(&nf_pktgen.obj_cap[port].start, sizeof(struct timeval));
+  //bzero(&nf_pktgen.obj_cap[port].start, sizeof(struct timeval));
 }
 
 ////////////////////////////////////////////////////////////
@@ -1181,45 +1208,12 @@ nf_cap_enable(char *dev_name, int caplen) {
     fprintf(stderr,"setup_channel: pcap_setnonblock(): %s\n",errbuf);
   cap->cap_fd = pcap_get_selectable_fd(cap->pcap_handle);
 
-  //open fd
-/*   cap->cap_fd = socket(PF_PACKET, SOCK_RAW, ETH_P_ALL); */
-/*   if(cap->cap_fd == -1) { */
-/*     perror("socket():"); */
-/*     return NULL; */
-/*   } */
-
-  //TODO: check if capturing has started and warn
-
-/*   //retrieve ethernet interface index */
-/*   strncpy(ifr.ifr_name, dev_name, IFNAMSIZ); */
-/*   if (ioctl(cap->cap_fd, SIOCGIFINDEX, &ifr) == -1) { */
-/*     perror("SIOCGIFINDEX"); */
-/*     return NULL; */
-/*   } */
-
-/*   sockaddr.sll_family = AF_PACKET; /\* Always AF_PACKET *\/ */
-/*   sockaddr.sll_protocol =  htons(ETH_P_ALL); /\* Physical layer protocol *\/ */
-/*   sockaddr.sll_ifindex =  ifr.ifr_ifindex; /\* Interface number *\/ */
-
-/*   //bind interface to the socket */
-/*   if( bind(cap->cap_fd, (struct sockaddr*)&sockaddr,sizeof(sockaddr)) == -1) { */
-/*     printf("Error 20008\nCould not bind Socket to Device!"); */
-/*     return NULL; */
-/*   } */
-
-/*   //set it in promiscuous mode */
-/*   strncpy(ifr.ifr_name, dev_name, 16); */
-/*   ioctl(cap->cap_fd,SIOCGIFFLAGS,&ifr); */
-/*   ifr.ifr_flags |= IFF_PROMISC; */
-/*   ioctl(cap->cap_fd, SIOCSIFFLAGS, &ifr); */
-
   //allocate memory for the packet
   cap->caplen = caplen;
   cap->packet_cache = (uint8_t *)xmalloc(caplen);
   if(!cap->packet_cache) {
     return NULL;
   }
-  
 
   printf("XXXXXXXXXXXXXXXXXXXXXXX nf_cap_enable XXXXXXXXXXXXXXXXXXXXXXX\n");
   return cap;
@@ -1246,19 +1240,19 @@ nf_gen_extract_header(struct nf_cap_t *cap, uint8_t *b, int len) {
   lldiv_t res;
 
   // sanity check 
-  if( (b == NULL) || (len < 80) || (cap->start.tv_sec == 0)) 
+  if( (b == NULL) || (len < 80)) 
     return NULL;
   
-
   //constant distacne
   ret = (struct pktgen_hdr *)((uint8_t *)b + 64);
 
   if((0xFFFFFF & ntohl(ret->magic)) != 0x9be955) { //simetimes the 1st byte is messed up
     //if the vlan tag is stripped move the translation by 4 bytes.
+    printf("Packet gen packet received %x\n",ntohl(ret->magic));
     ret = (struct pktgen_hdr *)((uint8_t *)b + 60); 
-    if((0xFFFFFF & ntohl(ret->magic)) != 0x9be955) 
+    if((0xFFFFFF & ntohl(ret->magic)) != 0x9be955) {
       return NULL;
-  
+    }
   }
 
   time_count =  (((uint64_t)ntohl(ret->tv_sec)) << 32) |  
@@ -1272,8 +1266,8 @@ nf_gen_extract_header(struct nf_cap_t *cap, uint8_t *b, int len) {
   //minor hack in case I am comparing against timestamp not made by the hw design
   res = lldiv(time_count, powl(10,9));
   if((uint32_t)res.quot < (1<<26)) { 
-    ret->tv_sec = cap->start.tv_sec + (uint32_t)res.quot;
-    ret->tv_usec = cap->start.tv_usec + ((uint32_t)(res.rem/1000));
+    ret->tv_sec = nf_pktgen.start.tv_sec + (uint32_t)res.quot;
+    ret->tv_usec =  nf_pktgen.start.tv_usec + ((uint32_t)(res.rem/1000));
   } else {
     ret->tv_sec = (uint32_t)res.quot;
     ret->tv_usec = ((uint32_t)(res.rem/1000));
@@ -1304,7 +1298,7 @@ nf_cap_next(struct nf_cap_t *cap, struct pcap_pkthdr *h) {
     return NULL;
   }
   
-  pcap_data = pcap_next(cap->pcap_handle, h);
+  pcap_data = (uint8_t *)pcap_next(cap->pcap_handle, h);
   //  len = recv(cap->cap_fd, data, 2048, 0);
   if(h->len <= 24) {
     fprintf(stderr, "received too small pakcet");
@@ -1326,22 +1320,22 @@ nf_cap_next(struct nf_cap_t *cap, struct pcap_pkthdr *h) {
     res = lldiv(time_count, powl(10,9));
   }
 
-  if((cap->start.tv_sec == 0) && (res.quot <  powl(10,6))) {   
-    cap->start.tv_sec = h->ts.tv_sec - res.quot;
-    if(h->ts.tv_usec < (uint32_t)(res.rem/1000)) {
-      cap->start.tv_usec = (1000000 + h->ts.tv_usec) - (uint32_t)(res.rem/1000);
-      cap->start.tv_sec--;
-    } else {
-      cap->start.tv_usec = h->ts.tv_usec - (uint32_t)(res.rem/1000);
-    }
-  } else if(cap->start.tv_sec > 0) {
-    h->ts.tv_sec = cap->start.tv_sec + (uint32_t)res.quot;
-    h->ts.tv_usec = cap->start.tv_usec + ((uint32_t)(res.rem/1000));
+/*   if((cap->start.tv_sec == 0) && (res.quot <  powl(10,6))) {    */
+/*     cap->start.tv_sec = h->ts.tv_sec - res.quot; */
+/*     if(h->ts.tv_usec < (uint32_t)(res.rem/1000)) { */
+/*       cap->start.tv_usec = (1000000 + h->ts.tv_usec) - (uint32_t)(res.rem/1000); */
+/*       cap->start.tv_sec--; */
+/*     } else { */
+/*       cap->start.tv_usec = h->ts.tv_usec - (uint32_t)(res.rem/1000); */
+/*     } */
+/*   } else if(cap->start.tv_sec > 0) { */
+    h->ts.tv_sec = nf_pktgen.start.tv_sec + (uint32_t)res.quot;
+    h->ts.tv_usec = nf_pktgen.start.tv_usec + ((uint32_t)(res.rem/1000));
     if(h->ts.tv_usec >= 1000000) {
       h->ts.tv_usec -= 1000000;
       h->ts.tv_sec++;
     }
-  }
+/*   } */
 
   if(test_output) {
     int32_t diff;
@@ -1351,7 +1345,7 @@ nf_cap_next(struct nf_cap_t *cap, struct pcap_pkthdr *h) {
     fprintf(test_output, "%lu.%06lu %lu.%06lu %ld %llu %lu.%06lu %llu.%09llu\n",
 	    old_header.ts.tv_sec,old_header.ts.tv_usec, 
 	    h->ts.tv_sec, h->ts.tv_usec, diff,
-	    time_count, cap->start.tv_sec, cap->start.tv_usec,
+	    time_count, nf_pktgen.start.tv_sec, nf_pktgen.start.tv_usec,
 	    res.quot, res.rem);
   }
 
@@ -1360,4 +1354,31 @@ nf_cap_next(struct nf_cap_t *cap, struct pcap_pkthdr *h) {
   memcpy(cap->packet_cache, pcap_data + 24, len);
 
   return cap->packet_cache;
+}
+
+void
+nf_cap_timeofday(struct timeval *now) {
+  uint32_t counter_h, counter_l;
+  uint64_t timer;
+  lldiv_t res;
+
+  writeReg(&nf_pktgen.nf2, COUNTER_READ_ENABLE_REG, 1);
+  writeReg(&nf_pktgen.nf2, COUNTER_READ_ENABLE_REG, 0);
+  
+  readReg(&nf_pktgen.nf2, COUNTER_BIT_95_64_REG, &counter_h);
+  readReg(&nf_pktgen.nf2, COUNTER_BIT_63_32_REG, &counter_l);
+  timer = ((uint64_t)counter_h<<32) + (uint64_t)(0xFFFFFFFF&counter_l);
+
+  if(nf_pktgen.resolve_ns) {
+    res = lldiv(timer, powl(10,6));
+  }   else {
+    res = lldiv(timer, powl(10,9));
+  }
+
+  now->tv_sec = nf_pktgen.start.tv_sec + (uint32_t)res.quot;
+  now->tv_usec = nf_pktgen.start.tv_usec + ((uint32_t)(res.rem/1000));
+  if(now->tv_usec >= 1000000) {
+    now->tv_usec -= 1000000;
+    now->tv_sec++;
+  }
 }
