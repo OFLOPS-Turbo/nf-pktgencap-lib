@@ -23,6 +23,8 @@
 #include "nf2util.h"
 #include "reg_defines_packet_generator.h"
 
+#define CORRECTION 0.999972
+
 struct nf_cap_t {
   pcap_t * pcap_handle;
   int cap_fd;
@@ -251,6 +253,7 @@ nf_init(int pad, int nodrop,int resolve_ns) {
   readReg(&nf_pktgen.nf2, COUNTER_BIT_95_64_REG, &counter_h);
   readReg(&nf_pktgen.nf2, COUNTER_BIT_63_32_REG, &counter_l);
   timer = ((uint64_t)counter_h<<32) + (uint64_t)(0xFFFFFFFF&counter_l);
+  timer = CORRECTION*timer;
   printf("counter: %llx %lx %lx\n", timer, counter_h, counter_l);
 
   if(nf_pktgen.resolve_ns) {
@@ -1257,7 +1260,7 @@ nf_gen_extract_header(struct nf_cap_t *cap, uint8_t *b, int len) {
 
   time_count =  (((uint64_t)ntohl(ret->tv_sec)) << 32) |  
     ((0xFFFFFFFF) & ((uint64_t)ntohl(ret->tv_usec))); 
-
+  time_count = time_count*CORRECTION;
  
   //printf("rcv %d %llu %llx\n",  ntohl(ret->seq_num), time_count, time_count);
   //  printf("packet time %lx %lx %llx\n", ntohl(ret->tv_sec), 
@@ -1312,7 +1315,7 @@ nf_cap_next(struct nf_cap_t *cap, struct pcap_pkthdr *h) {
   memcpy(&time_count, pcap_data + 16, sizeof(uint64_t));
   memcpy(&old_header, h, sizeof(struct pcap_pkthdr));
   time_count = ntohll(time_count);
-
+  time_count = time_count*CORRECTION;
   if(nf_pktgen.resolve_ns) {
     res = lldiv(time_count, powl(10,6));
   }   else {
@@ -1338,10 +1341,10 @@ nf_cap_next(struct nf_cap_t *cap, struct pcap_pkthdr *h) {
 
   if(test_output) {
     int32_t diff;
-    diff =  (h->ts.tv_sec - old_header.ts.tv_sec)*1000000 +
-       h->ts.tv_usec - old_header.ts.tv_usec;
+    diff =  ((int32_t)h->ts.tv_sec - (int32_t)old_header.ts.tv_sec)*1000000 +
+      (int32_t)h->ts.tv_usec - (int32_t)old_header.ts.tv_usec;
 
-    fprintf(test_output, "%lu.%06lu %lu.%06lu %ld %llu %lu.%06lu %llu.%09llu\n",
+    fprintf(test_output, "%lu.%06lu %lu.%06lu %lld %llu %lu.%06lu %llu.%09llu\n",
 	    old_header.ts.tv_sec,old_header.ts.tv_usec, 
 	    h->ts.tv_sec, h->ts.tv_usec, diff,
 	    time_count, nf_pktgen.start.tv_sec, nf_pktgen.start.tv_usec,
@@ -1367,7 +1370,7 @@ nf_cap_timeofday(struct timeval *now) {
   readReg(&nf_pktgen.nf2, COUNTER_BIT_95_64_REG, &counter_h);
   readReg(&nf_pktgen.nf2, COUNTER_BIT_63_32_REG, &counter_l);
   timer = ((uint64_t)counter_h<<32) + (uint64_t)(0xFFFFFFFF&counter_l);
-
+  timer = timer*CORRECTION;
   if(nf_pktgen.resolve_ns) {
     res = lldiv(timer, powl(10,6));
   }   else {
