@@ -170,8 +170,8 @@ nf_init(int pad, int nodrop,int resolve_ns) {
   bzero(nf_pktgen.rate, NUM_PORTS*sizeof(float));
 
   free(nf_pktgen.rate_enable);
-  nf_pktgen.rate_enable = (float *)xmalloc(NUM_PORTS*sizeof(float));
-  bzero(nf_pktgen.rate_enable, NUM_PORTS*sizeof(float));
+  nf_pktgen.rate_enable = (uint8_t *)xmalloc(NUM_PORTS*sizeof(uint8_t));
+  bzero(nf_pktgen.rate_enable, NUM_PORTS*sizeof(uint8_t));
 
   free(nf_pktgen.clks_between_tokens);
   nf_pktgen.clks_between_tokens = (uint32_t *)xmalloc(NUM_PORTS*sizeof(uint32_t));
@@ -1052,9 +1052,9 @@ nf_gen_wait_end() {
       queue_last = queue_last *((double)nf_pktgen.iterations[i]);
       queue_last += (nf_pktgen.final_pkt_delay[i] * pow(10, -9)) * 
       	(nf_pktgen.iterations[i] - 1.0);
-      printf("queue %d last sec : %lu.%09lu, last: %f, iterations : %d, len : %d\n", 
-	     i, nf_pktgen.last_sec[i], nf_pktgen.last_nsec[i], 
-	     queue_last, nf_pktgen.iterations[i], nf_pktgen.queue_data_len[i]);
+      // printf("queue %d last sec : %lu.%09lu, last: %f, iterations : %d, len : %d\n", 
+	     //i, nf_pktgen.last_sec[i], nf_pktgen.last_nsec[i], 
+	     //queue_last, nf_pktgen.iterations[i], nf_pktgen.queue_data_len[i]);
       if (queue_last > last_pkt) {
 	  last_pkt = queue_last;
       }
@@ -1218,7 +1218,6 @@ nf_cap_enable(char *dev_name, int caplen) {
     return NULL;
   }
 
-  printf("XXXXXXXXXXXXXXXXXXXXXXX nf_cap_enable XXXXXXXXXXXXXXXXXXXXXXX\n");
   return cap;
 };
 
@@ -1251,10 +1250,12 @@ nf_gen_extract_header(struct nf_cap_t *cap, uint8_t *b, int len) {
 
   if((0xFFFFFF & ntohl(ret->magic)) != 0x9be955) { //simetimes the 1st byte is messed up
     //if the vlan tag is stripped move the translation by 4 bytes.
-    printf("Packet gen packet received %x\n",ntohl(ret->magic));
     ret = (struct pktgen_hdr *)((uint8_t *)b + 60); 
     if((0xFFFFFF & ntohl(ret->magic)) != 0x9be955) {
-      return NULL;
+      ret = (struct pktgen_hdr *)((uint8_t *)b + 68); 
+      if((0xFFFFFF & ntohl(ret->magic)) != 0x9be955) {
+	return NULL;
+      }
     }
   }
 
