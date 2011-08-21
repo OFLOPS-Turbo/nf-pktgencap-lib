@@ -34,7 +34,7 @@ FILE *test_output;
 struct nf_cap_t;
 
 //a function to control the state of the design state
-int nf_init();
+int nf_init(int pad, int nodrop,int resolve_ns);
 
 //function to load data
 int nf_gen_load_pcap(const char *filename, int port, int32_t delay);
