@@ -235,15 +235,15 @@ nf_init(int pad, int nodrop,int resolve_ns) {
   //open the write device and 
   nf_pktgen.nf2.device_name = DEFAULT_IFACE;
   if (check_iface(&nf_pktgen.nf2)) 
-    exit(1);
+    return -1;
 
   if (openDescriptor(&nf_pktgen.nf2))
-    exit(1);
+    return -1;
 
 
   if(packet_generator_enable(0x0)) {
     perror("packet_generator_enable");
-    exit(1);
+    return -1;
   }
 
   writeReg(&nf_pktgen.nf2, COUNTER_READ_ENABLE_REG, 1);
@@ -582,7 +582,7 @@ nf_gen_load_pcap(const char *filename, int port, int32_t delay) {
 
   if((pcap = pcap_open_offline(filename, errbuf)) == NULL) {
     fprintf(stderr, "pcap_open_offline:%s\n", errbuf);
-    exit(1);
+    reutnr -1;
   }
   printf("laod file %s with delay %ld\n", filename, delay);
 
@@ -1203,7 +1203,7 @@ nf_cap_enable(char *dev_name, int caplen) {
 
   if(!cap->pcap_handle) {
     fprintf( stderr, "pcap_open_live failed: %s\n",errbuf);
-    exit(1);
+    return -1;
   }
 
 
