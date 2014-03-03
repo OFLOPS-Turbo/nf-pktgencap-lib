@@ -1,0 +1,14 @@
+*/*.lo
+*.la
+*.a
+*.so
+*.o
+config.h
+config.h.in
+config.h.in~
+aclocal.m4
+config.log
+
+Makefile
+Makefile.in
+configure

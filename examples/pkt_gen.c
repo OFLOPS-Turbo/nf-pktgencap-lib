@@ -20,12 +20,12 @@ main(int argc, char *argv[]) {
   nf_gen_rate_limiter_disable(3, 0);
   nf_gen_set_number_iterations (10, 1, 0);
   //nf_gen_set_number_iterations (10, 1, 1);
-  nf_gen_set_number_iterations (10, 1, 2);
+//  nf_gen_set_number_iterations (10, 1, 2);
   //nf_gen_set_number_iterations (10, 1, 3);
 
   //load the pcap capture file
-  nf_gen_load_pcap("/root/netfpga/projects/packet_generator/sw/http.pcap", 0, 0);
-  nf_gen_load_pcap("/root/netfpga/projects/packet_generator/sw/http.pcap", 2, 0);
+  nf_gen_load_pcap("/root/OSNT/code/osnt_sw/apps/nf1.cap", 0, 1000000);
+//  nf_gen_load_pcap("/root/netfpga/projects/packet_generator/sw/http.pcap", 2, 0);
 
   nf_start(1);
 
