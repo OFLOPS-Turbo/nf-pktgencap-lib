@@ -63,9 +63,12 @@ int nf_finish();
 
 int nf_gen_stat(int queue, struct nf_gen_stats *stat);
 int nf_cap_stat(int queue, struct nf_cap_stats *stat);
+int display_xmit_metrics(int queue, struct nf_gen_stats *stat);
 
 
 void nf_cap_timeofday(struct timeval *now);
 // int nf_cap_run(void (*f)(struct pcap_pkthdr*, uint8_t*, int) );
+struct pktgen_hdr *nf_gen_extract_header(struct nf_cap_t *, uint8_t *, int);
+
 
 #endif

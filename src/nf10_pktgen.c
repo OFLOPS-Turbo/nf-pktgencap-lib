@@ -1,4 +1,3 @@
-#include "nf_pktgen.h"
 #include <stdio.h>
 #include <sys/ioctl.h>
 #include <fcntl.h>
@@ -11,18 +10,24 @@
 #include <sys/socket.h>
 #include <linux/if_packet.h>
 #include <linux/if_ether.h>
-// #include <linux/if_arp.h>
 #include <pcap/pcap.h>
 #include <net/if.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <sys/queue.h>
 #include <sys/eventfd.h>
+#include <sys/mman.h>
+#include <signal.h>
+#include <pthread.h>
 
 #define NUM_PORTS 4
 #define MEM_HIGH_ADDR 512*1024
 
 #define DATAPATH_FREQUENCY 160000000L
+
+
+#undef PKTGEN_HDR
+#include "nf_pktgen.h"
 
 int nf_cap_run();
 
@@ -33,16 +38,9 @@ struct pcap_packet_t {
 };
 
 struct nf_cap_t {
-//  pcap_t * pcap_handle;
   int cap_fd;
   int if_ix;
-//  char *name;
-//  struct pcap_pkthdr *cap_hdr;
-//  uint8_t *packet_cache;
-//  int caplen;
 };
-
-
 
 struct str_nf_pktgen {
   int dev_fd; 
@@ -55,16 +53,14 @@ struct str_nf_pktgen {
 
   TAILQ_HEAD(pcap_packet_h, pcap_packet_t) cap_pkts[NUM_PORTS];
 
-//  int queue_base_addr[NUM_PORTS];
-
   uint8_t *queue_data[NUM_PORTS];
   uint32_t *pkt_len[NUM_PORTS];
   uint32_t queue_data_len[NUM_PORTS];
   int cap_fd[NUM_PORTS];
   
-  uint32_t iterations[NUM_PORTS];
   uint32_t total_words;
   uint8_t pad, nodrop, resolve_ns;
+  double gen_start;
 
   int terminate;
 
@@ -82,6 +78,14 @@ struct str_nf_pktgen nf10;
 #define NF10_IOCTL_CMD_READ_STAT (SIOCDEVPRIVATE+0)
 #define NF10_IOCTL_CMD_WRITE_REG (SIOCDEVPRIVATE+9)
 #define NF10_IOCTL_CMD_READ_REG (SIOCDEVPRIVATE+2)
+#define NF10_IOCTL_CMD_READ_STAT (SIOCDEVPRIVATE+0)
+#define NF10_IOCTL_CMD_READ_REG (SIOCDEVPRIVATE+2)
+#define NF10_IOCTL_CMD_RESET_DMA (SIOCDEVPRIVATE+3)
+#define NF10_IOCTL_CMD_SET_RX_DNE_HEAD (SIOCDEVPRIVATE+4)
+#define NF10_IOCTL_CMD_SET_RX_BUFF_HEAD (SIOCDEVPRIVATE+5)
+#define NF10_IOCTL_CMD_SET_RX_PKT_HEAD (SIOCDEVPRIVATE+6)
+#define NF10_IOCTL_CMD_START_DMA (SIOCDEVPRIVATE+7)
+#define NF10_IOCTL_CMD_STOP_DMA (SIOCDEVPRIVATE+8)
 
 int 
 rdaxi(uint32_t addr, uint32_t *ret) {
@@ -101,7 +105,7 @@ wraxi(uint32_t addr, uint32_t val) {
     perror("wraxi");
     return -1;
   }
-  //printf("write %08x -> %08x %016lx\n", addr, val, req);
+  // printf("write %08x -> %08x %016lx\n", addr, val, req);
   return 0; 
 }
 
@@ -136,6 +140,7 @@ int nf_gen_load_packet(struct pcap_pkthdr *h, const unsigned char *data,
   nf10.pkt_len[port] = (uint32_t *)realloc(nf10.pkt_len[port], nf10.queue_pkts[port]);
   nf10.pkt_len[port][nf10.queue_pkts[port] - 1] = len;
 
+  nf10.queue_delay[port] = (delay*DATAPATH_FREQUENCY)/1000000000L;
   return 0;
 }
 
@@ -152,12 +157,11 @@ int nf_gen_load_pcap(const char *filename, int port, uint64_t ns_delay) {
   }
 
   while((pkt = pcap_next(pcap, &h)) != NULL) {
-    if (nf_gen_load_packet(&h, pkt,  port, 0) < 0) {
+    if (nf_gen_load_packet(&h, pkt,  port, ns_delay) < 0) {
       break;
     }
   }
 
-  nf10.queue_delay[port] = (ns_delay*DATAPATH_FREQUENCY)/1000000000L;
   pcap_close(pcap);
   return 0;
 }
@@ -176,8 +180,16 @@ int nf_gen_load_pcap(const char *filename, int port, uint64_t ns_delay) {
 #define INTER_PKT_DELAY_USE_REG     0x8
 #define INTER_PKT_DELAY_RST         0x0
 
+#define TX_TIMESTAMP_BASE_ADDR 0x79a00000
+#define TX_TIMESTAMP_ENABLE 0x0
+#define TX_TIMESTAMP_OFFSET 0x4
+
 int 
-generator_rst(uint32_t val) {return wraxi(PCAP_ENGINE_BASE_ADDR + PCAP_ENGINE_RESET, val);}
+generator_rst(uint32_t val) {
+  int ret = wraxi(PCAP_ENGINE_BASE_ADDR + PCAP_ENGINE_RESET, val);
+  sleep(0.1);
+  return ret;
+}
 
 int 
 rst_gen_mem() {
@@ -211,15 +223,17 @@ stop_gen() {
 int 
 start_gen() {
   int i;
-  uint32_t enable = 0; 
+  uint32_t enable = 0, en_tmstmp = 1, tmstmp=7; 
   for (i=0;i<NUM_PORTS;i++) {  
     enable = (int32_t)(nf10.queue_bytes[i] > 0); 
     if ((wraxi(PCAP_ENGINE_BASE_ADDR + PCAP_ENGINE_ENABLE + i*0x4, enable) < 0) ||
+        (wraxi(TX_TIMESTAMP_BASE_ADDR + TX_TIMESTAMP_ENABLE + i*0x100000, en_tmstmp) < 0) ||
+        (wraxi(TX_TIMESTAMP_BASE_ADDR + TX_TIMESTAMP_OFFSET + i*0x100000, tmstmp) < 0) ||
         (wraxi(PCAP_ENGINE_BASE_ADDR + PCAP_ENGINE_REPLAY + i*0x4, enable) < 0) ) {
       perror("PCAP_ENGINE_ENABLE error");
       return -1;
     }
-    // sleep(1);
+    sleep(0.1);
   }
   return 0;
 }
@@ -229,7 +243,6 @@ set_gen_mem() {
   int i;
   uint32_t offset = 0, enable = 0;
   for (i=0;i<NUM_PORTS;i++) {
-    // printf("setting port nf%d = %d %d %d\n", i, offset, offset + nf10.queue_pages[i], nf10.queue_iter[i]);
     if ((wraxi(PCAP_ENGINE_BASE_ADDR + PCAP_ENGINE_MEM_LOW + i*0x8, offset) < 0) ||
         (wraxi(PCAP_ENGINE_BASE_ADDR + PCAP_ENGINE_MEM_HIGH + i*0x8, (offset + nf10.queue_pages[i])) < 0) ||
         (wraxi(PCAP_ENGINE_BASE_ADDR + PCAP_ENGINE_REPLAY_CNT + i*0x4, nf10.queue_iter[i]) < 0)) {
@@ -275,10 +288,9 @@ nf_init(int pad, int nodrop,int resolve_ns) {
   nf10.nodrop = nodrop;
   nf10.resolve_ns = resolve_ns;
 
-  for (i=0;i<NUM_PORTS;i++) {
-//    nf10.cap_pkts[i] = TAILQ_HEAD_INITIALIZER(nf10.cap_pkts[i]);
+  for (i=0;i<NUM_PORTS;i++) 
     TAILQ_INIT(&nf10.cap_pkts[i]);
-  }
+  
     
   generator_rst(1);
   stop_gen();
@@ -331,13 +343,15 @@ int nf_start(int wait) {
     }
     // printf("sending packet\n");
     close(if_fd);
-  } 
+  }
+  nf10.gen_start = ((double)time(NULL));
   start_gen();
 
   return 0;
 }
 
 int nf_gen_reset_queue(int port) {
+  printf("unimplemented nf_gen_reset_queue\n");
   return 0;
 }
 
@@ -352,6 +366,7 @@ int nf_gen_set_number_iterations(int number_iterations, int iterations_enable,
 }
 
 int nf_gen_rate_limiter_enable(int port, int cpu) {
+  printf("unimplemented nf_gen_rate_limiter_enable");
   return 0;
 }
 
@@ -366,14 +381,50 @@ int nf_gen_rate_limiter_set(int port, int cpu, float rate) {
 }
 
 int nf_gen_wait_end() {
+  int i;
+  double last_pkt = 0, delta = 0, queue_last;
+  for (i = 0; i < NUM_PORTS; i++) {
+    if (nf10.queue_data_len[i]) {
+      queue_last = nf10.queue_pkts[i] * nf10.queue_delay[i] * pow(10,-9) * nf10.queue_iter[i]; 
+      if (queue_last > last_pkt) {
+        last_pkt = queue_last;
+      }
+    }
+  }
+
+  printf("delta : %f, last_pkt: %.09f\n", delta, last_pkt);
+  // Wait the requesite number of seconds
+  while (delta <= last_pkt) {
+    printf("\r%1.3f seconds elapsed...\n", delta);
+    pthread_yield();
+    delta = ((double)time(NULL)) - nf10.gen_start;
+  }  
   return 0;
 }
 
 int nf_gen_finished() {
-  return 0;
+  int i;
+  double last_pkt = 0, delta = 0, queue_last;
+  for (i = 0; i < NUM_PORTS; i++) {
+    if (nf10.queue_data_len[i]) {
+      queue_last = ((double)nf10.queue_delay[i]) / (double)(10*DATAPATH_FREQUENCY);
+      queue_last *= nf10.queue_pkts[i] * nf10.queue_iter[i]; 
+      if (queue_last > last_pkt) {
+        last_pkt = queue_last;
+      }
+    }
+  }
+
+//  printf("finished? %e %e < %ld %ld %ld %e\n", ((double)time(NULL)), nf10.gen_start, nf10.queue_delay[i], nf10.queue_pkts[i], 
+//      nf10.queue_iter[i], last_pkt);
+//  return (((double)time(NULL) - nf10.gen_start) > last_pkt);
+  return 0; 
+
 }
 
 int nf_restart() {
+  stop_gen();
+  start_gen();
   return 0;
 }
 
@@ -416,18 +467,24 @@ const uint8_t *nf_cap_next(struct nf_cap_t *cap, struct pcap_pkthdr *h) {
 
   read(nf10.cap_fd[cap->if_ix], &i, sizeof(i));
 
-  pkt = TAILQ_FIRST(&nf10.cap_pkts[cap->if_ix]);
-  TAILQ_REMOVE(&nf10.cap_pkts[cap->if_ix], pkt, entries);
+  if (!TAILQ_EMPTY(&nf10.cap_pkts[cap->if_ix])) {
+    pkt = TAILQ_FIRST(&nf10.cap_pkts[cap->if_ix]);
+    TAILQ_REMOVE(&nf10.cap_pkts[cap->if_ix], pkt, entries);
 
-  memcpy(h, &pkt->h, sizeof(struct pcap_pkthdr));
-  ret = pkt->pkt;
-  free(pkt);
-  return ret;
+    memcpy(h, &pkt->h, sizeof(struct pcap_pkthdr));
+    ret = pkt->pkt;
+    free(pkt);
+    return ret;
+  } else 
+    return NULL;
 }
 
 int nf_finish() {
+  uint64_t v = 1;
+  stop_gen();
   nf10.terminate = 1;
-  close(nf10.dev_fd);
+  // close(nf10.dev_fd);
+  printf("XXXXXXXX terminating generation thread XXXXXXXX\n");
   return 0;
 }
 
@@ -449,24 +506,15 @@ int nf_cap_stat(int queue, struct nf_cap_stats *stat) {
   return 0;
 }
 
-void nf_cap_timeofday(struct timeval *now) {
+void 
+nf_cap_timeofday(struct timeval *now) {
+  printf("unimplemented nf_cap_timeofday\n");
  return;
 }
 
 #define PAGE_SIZE 4096
 #define BUFSIZE 7
 
-#define NF10_IOCTL_CMD_READ_STAT (SIOCDEVPRIVATE+0)
-#define NF10_IOCTL_CMD_READ_REG (SIOCDEVPRIVATE+2)
-#define NF10_IOCTL_CMD_RESET_DMA (SIOCDEVPRIVATE+3)
-#define NF10_IOCTL_CMD_SET_RX_DNE_HEAD (SIOCDEVPRIVATE+4)
-#define NF10_IOCTL_CMD_SET_RX_BUFF_HEAD (SIOCDEVPRIVATE+5)
-#define NF10_IOCTL_CMD_SET_RX_PKT_HEAD (SIOCDEVPRIVATE+6)
-#define NF10_IOCTL_CMD_START_DMA (SIOCDEVPRIVATE+7)
-#define NF10_IOCTL_CMD_STOP_DMA (SIOCDEVPRIVATE+8)
-
-#include <sys/mman.h>
-#include <signal.h>
 int rx_dne_file;
 int rx_buff_file;
 uint64_t rx_dne_head = 0;
@@ -521,7 +569,7 @@ nf_cap_run() {
   if(ioctl(nf10.dev_fd, NF10_IOCTL_CMD_RESET_DMA, v) < 0){
     perror("nf10 reset dma failed");
     goto error_out;
-  }
+  } 
 
   if(ioctl(nf10.dev_fd, NF10_IOCTL_CMD_START_DMA, v) < 0){
     perror("nf10 start dma failed");
@@ -582,9 +630,73 @@ nf_cap_run() {
   }
 
 error_out:
+
+  printf("XXXXXXXX terminating capturing thread XXXXXXXX\n");
   ioctl(nf10.dev_fd, NF10_IOCTL_CMD_STOP_DMA, v);
   close(rx_dne_file);
   close(rx_buff_file);
   return -1;
 }
+
+int
+display_xmit_metrics(int queue, struct nf_gen_stats *stat) {
+  printf("Unimplemented function display_xmit_metrics\n");
+  return 0; 
+ // readReg(&nf_pktgen.nf2,
+ //     OQ_QUEUE_0_NUM_PKTS_REMOVED_REG+(queue+8)*nf_pktgen.queue_addr_offset,
+ //     &stat->pkt_snd_cnt);
+} 
+
+struct str_nf_pktgen nf_pktgen;
+
+struct pktgen_hdr *
+nf_gen_extract_header(struct nf_cap_t *cap, uint8_t *b, int len) {
+  struct pktgen_hdr *ret;
+  uint64_t time_count;
+  lldiv_t res;
+
+  // sanity check 
+  if( (b == NULL) || (len < 80)) 
+    return NULL;
+
+  //constant distacne
+  ret = (struct pktgen_hdr *)((uint8_t *)b + 54);
+
+  if((0xFFFFFFFF & ntohl(ret->magic)) != 0xdeadbeef) { //sometimes the 1st byte is messed up
+    //if the vlan tag is stripped move the translation by 4 bytes.
+    // printf("Packet gen packet received %x\n",ntohl(ret->magic));
+    ret = (struct pktgen_hdr *)((uint8_t *)b + 52); 
+    if((0xFFFFFFFF & ntohl(ret->magic)) != 0xdeadbeef) {
+      // printf("reading header %x\n", 0xFFFFFFFF & ntohl(ret->magic));
+      ret = (struct pktgen_hdr *)((uint8_t *)b + 62); 
+      if((0xFFFFFFFF & ntohl(ret->magic)) != 0xdeadbeef) {
+        return NULL;
+      }
+    }
+  }
+
+  time_count =  (((uint64_t)ntohl(ret->tv_sec)) << 32) |  
+    ((0xFFFFFFFF) & ((uint64_t)ntohl(ret->tv_usec))); 
+//  time_count = time_count*CORRECTION;
+
+  //printf("rcv %d %llu %llx\n",  ntohl(ret->seq_num), time_count, time_count);
+  //  printf("packet time %lx %lx %llx\n", ntohl(ret->tv_sec), 
+  // ntohl(ret->tv_usec), time_count); 
+
+  //minor hack in case I am comparing against timestamp not made by the hw design
+  res = lldiv(time_count, powl(10,9));
+  ret->tv_sec = (uint32_t)res.quot;
+  ret->tv_usec = ((uint32_t)(res.rem/1000));
+  
+  if(ret->tv_usec >= 1000000) {
+    ret->tv_usec -= 1000000;
+    ret->tv_sec++;
+  }
+  ret->seq_num = ntohl(ret->seq_num);
+  //printf("packet time %lx %lx %lu.%06lu\n", ntohl(ret->magic), ntohl(ret->seq_num),
+  //	 ret->tv_sec, ret->tv_usec);
+  return ret;
+}
+
+
 
