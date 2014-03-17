@@ -1,12 +1,16 @@
 # Process this file with autoconf to produce a configure script.
 AC_PREREQ([2.59])
 AC_INIT([netfpga-packet-generator-c-library], [0.01], [cr409@cl.cam.ac.uk])
+${CFLAGS=""}
+AC_PROG_CC
 AM_INIT_AUTOMAKE([-Wall foreign])
+AM_PROG_AR
+AM_PROG_CC_C_O
+
 AC_CONFIG_SRCDIR([src])
 AC_CONFIG_HEADERS([config.h])
 
 # Checks for programs.
-AC_PROG_CC
 AC_PROG_INSTALL
 AC_PROG_AWK
 AC_PROG_CPP

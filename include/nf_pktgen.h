@@ -7,7 +7,7 @@
 //#define DEBUG 1
 
 struct nf_cap_stats {
-  uint64_t byte_cnt;
+  uint32_t byte_cnt;
   uint32_t pkt_cnt;
   uint32_t capture_packet_cnt;
   //double duration;
@@ -37,9 +37,9 @@ struct nf_cap_t;
 int nf_init(int pad, int nodrop,int resolve_ns);
 
 //function to load data
-int nf_gen_load_pcap(const char *filename, int port, int32_t delay);
+int nf_gen_load_pcap(const char *filename, int port, uint64_t delay);
 int nf_gen_load_packet(struct pcap_pkthdr *h, const unsigned char *data, 
-		       int port, int32_t delay);
+		       int port, uint64_t delay);
 int nf_gen_reset_queue(int port);
 
 int nf_gen_set_number_iterations(int number_iterations, int iterations_enable, 
@@ -63,8 +63,12 @@ int nf_finish();
 
 int nf_gen_stat(int queue, struct nf_gen_stats *stat);
 int nf_cap_stat(int queue, struct nf_cap_stats *stat);
+int display_xmit_metrics(int queue, struct nf_gen_stats *stat);
 
 
 void nf_cap_timeofday(struct timeval *now);
+// int nf_cap_run(void (*f)(struct pcap_pkthdr*, uint8_t*, int) );
+struct pktgen_hdr *nf_gen_extract_header(struct nf_cap_t *, uint8_t *, int);
+
 
 #endif

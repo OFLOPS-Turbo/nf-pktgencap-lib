@@ -1,5 +1,4 @@
 #include "nf_pktgen.h"
-
 #include <stdio.h>
 #define __USE_ISOC99 1
 #include <stdlib.h>
@@ -86,6 +85,7 @@ struct str_nf_pktgen {
   struct nf2device nf2;
 };
 
+
 struct str_nf_pktgen nf_pktgen;
 
 /*
@@ -114,7 +114,6 @@ ntohll(uint64_t val) {
 
   return ret;
 }
-
 
 /*
  * TODO:
@@ -353,6 +352,14 @@ nf_gen_reset_queue(int port) {
   //bzero(&nf_pktgen.obj_cap[port].start, sizeof(struct timeval));
 }
 
+#define PCAP_ENGINE_BASE_ADDR  0x76000000
+#define PCAP_ENGINE_RST        0x0
+#define PCAP_ENGINE_REPLAY     0x4
+#define PCAP_ENGINE_REPLAY_CNT 0x14
+#define PCAP_ENGINE_MEM_LOW    0x24
+#define PCAP_ENGINE_MEM_HIGH   0x28
+#define PCAP_ENGINE_ENABLE     0x44
+
 ////////////////////////////////////////////////////////////
 // Name: load_packet
 // Append a packet on the local data cache of the data send out of a specific port
@@ -361,7 +368,8 @@ nf_gen_reset_queue(int port) {
 //            delay            Delay from the previous packet in microseconds
 ////////////////////////////////////////////////////////////
 int
-nf_gen_load_packet(struct pcap_pkthdr *h, const unsigned char *data, int port, int32_t delay) {
+nf_gen_load_packet(struct pcap_pkthdr *h, const unsigned char *data, int port, 
+    uint64_t delay) {
   uint32_t src_port = 0, dst_port = 0x100;
   uint32_t sec = h->ts.tv_sec, usec = h->ts.tv_usec;
   uint32_t len = h->len, caplen = h->caplen, word_len = ceil(((float)len)/8), packet_words;
@@ -561,7 +569,6 @@ nf_gen_load_packet(struct pcap_pkthdr *h, const unsigned char *data, int port, i
     nf_pktgen.final_pkt_delay[port] *= NSEC_PER_BYTE;
   }
 
-
   nf_pktgen.num_pkts[port]++;
   return 0;
 }
@@ -574,7 +581,7 @@ nf_gen_load_packet(struct pcap_pkthdr *h, const unsigned char *data, int port, i
 //            delay            Delay from the previous packet
 ////////////////////////////////////////////////////////////
 int
-nf_gen_load_pcap(const char *filename, int port, int32_t delay) {
+nf_gen_load_pcap(const char *filename, int port, uint64_t delay) {
   pcap_t *pcap; 
   const unsigned char *data;
   struct pcap_pkthdr h;
@@ -589,7 +596,7 @@ nf_gen_load_pcap(const char *filename, int port, int32_t delay) {
   while((data = pcap_next(pcap, &h)) != NULL) {
     if (h.len != h.caplen) {
       fprintf(stderr, "Warning: The capture length was less than the packet length for one");
-      fprintf(stderr, " or more packets in '$pcap_filename'. Packets will be0001fffc padded with zeros.\n");
+      fprintf(stderr, " or more packets in '$pcap_filename'. Packets will be padded with zeros.\n");
     }
 
 
@@ -1324,15 +1331,6 @@ nf_cap_next(struct nf_cap_t *cap, struct pcap_pkthdr *h) {
     res = lldiv(time_count, powl(10,9));
   }
 
-  /*   if((cap->start.tv_sec == 0) && (res.quot <  powl(10,6))) {    */
-  /*     cap->start.tv_sec = h->ts.tv_sec - res.quot; */
-  /*     if(h->ts.tv_usec < (uint32_t)(res.rem/1000)) { */
-  /*       cap->start.tv_usec = (1000000 + h->ts.tv_usec) - (uint32_t)(res.rem/1000); */
-  /*       cap->start.tv_sec--; */
-  /*     } else { */
-  /*       cap->start.tv_usec = h->ts.tv_usec - (uint32_t)(res.rem/1000); */
-  /*     } */
-  /*   } else if(cap->start.tv_sec > 0) { */
   h->ts.tv_sec = nf_pktgen.start.tv_sec + (uint32_t)res.quot;
   h->ts.tv_usec = nf_pktgen.start.tv_usec + ((uint32_t)(res.rem/1000));
   if(h->ts.tv_usec >= 1000000) {
