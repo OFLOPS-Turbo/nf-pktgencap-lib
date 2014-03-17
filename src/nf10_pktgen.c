@@ -596,13 +596,13 @@ nf_cap_run() {
       memcpy(cap->pkt, rx_buff+rx_buff_head, len);
 
       int port = 0;
-      if(port_encoded & 0x0200) 
+      if(port_encoded & 0x0001) 
         port=0;
-      else if(port_encoded & 0x0800) 
+      else if(port_encoded & 0x0004) 
         port=1;
-      else if(port_encoded & 0x2000) 
+      else if(port_encoded & 0x0010) 
         port=2;
-      else if(port_encoded & 0x8000) 
+      else if(port_encoded & 0x0040) 
         port=3;
       
       TAILQ_INSERT_TAIL(&nf10.cap_pkts[port], cap, entries);
@@ -684,14 +684,17 @@ nf_gen_extract_header(struct nf_cap_t *cap, uint8_t *b, int len) {
   // ntohl(ret->tv_usec), time_count); 
 
   //minor hack in case I am comparing against timestamp not made by the hw design
-  res = lldiv(time_count, powl(10,9));
-  ret->tv_sec = (uint32_t)res.quot;
-  ret->tv_usec = ((uint32_t)(res.rem/1000));
+  ret->tv_sec = ((time_count>>32)&0xffffffff);
+  ret->tv_usec = (((time_count&0xffffffff)*1000000000)>>32);
   
-  if(ret->tv_usec >= 1000000) {
-    ret->tv_usec -= 1000000;
-    ret->tv_sec++;
-  }
+//  res = lldiv(time_count, powl(10,9));
+//  ret->tv_sec = (uint32_t)res.quot;
+//  ret->tv_usec = ((uint32_t)(res.rem/1000));
+//  
+//  if(ret->tv_usec >= 1000000) {
+//    ret->tv_usec -= 1000000;
+//    ret->tv_sec++;
+//  }
   ret->seq_num = ntohl(ret->seq_num);
   //printf("packet time %lx %lx %lu.%06lu\n", ntohl(ret->magic), ntohl(ret->seq_num),
   //	 ret->tv_sec, ret->tv_usec);
