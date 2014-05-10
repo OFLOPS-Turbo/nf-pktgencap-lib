@@ -14,7 +14,7 @@ struct nf_cap_stats {
 };
 
 struct nf_gen_stats {
-  uint32_t pkt_snd_cnt;  
+  uint32_t pkt_snd_cnt;
 };
 
 #ifndef PKTGEN_HDR
@@ -38,11 +38,11 @@ int nf_init(int pad, int nodrop,int resolve_ns);
 
 //function to load data
 int nf_gen_load_pcap(const char *filename, int port, uint64_t delay);
-int nf_gen_load_packet(struct pcap_pkthdr *h, const unsigned char *data, 
+int nf_gen_load_packet(struct pcap_pkthdr *h, const unsigned char *data,
 		       int port, uint64_t delay);
 int nf_gen_reset_queue(int port);
 
-int nf_gen_set_number_iterations(int number_iterations, int iterations_enable, 
+int nf_gen_set_number_iterations(int number_iterations, int iterations_enable,
 			  int queue);
 
 int nf_gen_rate_limiter_enable(int port, int cpu);
@@ -68,7 +68,7 @@ int display_xmit_metrics(int queue, struct nf_gen_stats *stat);
 
 void nf_cap_timeofday(struct timeval *now);
 // int nf_cap_run(void (*f)(struct pcap_pkthdr*, uint8_t*, int) );
-struct pktgen_hdr *nf_gen_extract_header(struct nf_cap_t *, uint8_t *, int);
+struct pktgen_hdr *nf_gen_extract_header(struct nf_cap_t *, const uint8_t *, int);
 
 
 #endif

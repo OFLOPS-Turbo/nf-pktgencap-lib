@@ -4,36 +4,36 @@
 
 int
 main(int argc, char *argv[]) {
-  int i;
-  uint32_t start;
-  int32_t pkt_gap = 1000000000;
+    int i;
+    uint32_t start;
+    int32_t pkt_gap = 1000000000;
 
-  printf("Initiating packet generator\n");
+    printf("Initiating packet generator\n");
 
-  //enable padding
-  nf_init(1, 0, 1); 
+    //enable padding
+    nf_init(1, 0, 1);
 
-/*   // Set the number of iterations for the queues with pcap files */
-  nf_gen_rate_limiter_disable(0, 0);
-  nf_gen_rate_limiter_disable(1, 0);
-  nf_gen_rate_limiter_disable(2, 0);
-  nf_gen_rate_limiter_disable(3, 0);
-  nf_gen_set_number_iterations (10, 1, 0);
-  //nf_gen_set_number_iterations (10, 1, 1);
-//  nf_gen_set_number_iterations (10, 1, 2);
-  //nf_gen_set_number_iterations (10, 1, 3);
+    /*   // Set the number of iterations for the queues with pcap files */
+    nf_gen_rate_limiter_disable(0, 0);
+    nf_gen_rate_limiter_disable(1, 0);
+    nf_gen_rate_limiter_disable(2, 0);
+    nf_gen_rate_limiter_disable(3, 0);
+    nf_gen_set_number_iterations (10, 1, 0);
+    //nf_gen_set_number_iterations (10, 1, 1);
+    //  nf_gen_set_number_iterations (10, 1, 2);
+    //nf_gen_set_number_iterations (10, 1, 3);
 
-  //load the pcap capture file
-  nf_gen_load_pcap("/root/OSNT/code/osnt_sw/apps/nf1.cap", 0, 1000000);
-//  nf_gen_load_pcap("/root/netfpga/projects/packet_generator/sw/http.pcap", 2, 0);
+    //load the pcap capture file
+    nf_gen_load_pcap("/root/data.pcap", 0, 1000000);
+    //  nf_gen_load_pcap("/root/netfpga/projects/packet_generator/sw/http.pcap", 2, 0);
 
-  nf_start(1);
+    nf_start(1);
+    sleep(10);
 
+    // Wait until the correct number of packets is sent
+    nf_finish();
 
-  // Wait until the correct number of packets is sent
-  nf_finish();
-
-  return 0;
+    return 0;
 
 }
 
