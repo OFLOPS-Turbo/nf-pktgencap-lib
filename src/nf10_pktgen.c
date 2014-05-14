@@ -188,7 +188,7 @@ int nf_gen_load_pcap(const char *filename, int port, uint64_t ns_delay) {
 int
 generator_rst(uint32_t val) {
     int ret = wraxi(PCAP_ENGINE_BASE_ADDR + PCAP_ENGINE_RESET, val);
-    sleep(0.1);
+    sleep(1);
     return ret;
 }
 
@@ -244,13 +244,33 @@ set_gen_mem() {
     int i;
     uint32_t offset = 0, enable = 0;
     for (i=0;i<NUM_PORTS;i++) {
-        if ((wraxi(PCAP_ENGINE_BASE_ADDR + PCAP_ENGINE_MEM_LOW + i*0x8, offset) < 0) ||
-                (wraxi(PCAP_ENGINE_BASE_ADDR + PCAP_ENGINE_MEM_HIGH + i*0x8, (offset + nf10.queue_pages[i])) < 0) ||
-                (wraxi(PCAP_ENGINE_BASE_ADDR + PCAP_ENGINE_REPLAY_CNT + i*0x4, nf10.queue_iter[i]) < 0)) {
+        printf("port %d: %d-%d iter %d\n", i, offset, offset + nf10.queue_pages[i], nf10.queue_iter[i]);
+        if ((wraxi(PCAP_ENGINE_BASE_ADDR + PCAP_ENGINE_MEM_LOW + i*0x8, offset) < 0)) {
             perror("set_gen_mem");
             return -1;
         }
+    }
 
+    for (i=0;i<NUM_PORTS;i++) {
+        if (wraxi(PCAP_ENGINE_BASE_ADDR + PCAP_ENGINE_MEM_HIGH + i*0x8, (offset + nf10.queue_pages[i])) < 0) {
+            perror("set_gen_mem");
+            return -1;
+        }
+    }
+
+    for (i=0;i<NUM_PORTS;i++) {
+    if(wraxi(PCAP_ENGINE_BASE_ADDR + PCAP_ENGINE_REPLAY_CNT + i*0x4, nf10.queue_iter[i]) < 0) {
+            perror("set_gen_mem");
+            return -1;
+        }
+    }
+
+    for (i=0;i<NUM_PORTS;i++) {
+        uint32_t enable = (nf10.queue_bytes[i] > 0);
+        wraxi(PCAP_ENGINE_BASE_ADDR + PCAP_ENGINE_ENABLE + i*0x4, enable);
+    }
+
+    for (i=0;i<NUM_PORTS;i++) {
         if (nf10.queue_delay[i] > 0) {
             if ((wraxi(INTER_PKT_DELAY_BASE_ADDR + 0x10*i + INTER_PKT_DELAY, nf10.queue_delay[i]) < 0) ||
                     (wraxi(INTER_PKT_DELAY_BASE_ADDR + 0x10*i + INTER_PKT_DELAY_ENABLE, 1) < 0) ||
@@ -266,7 +286,7 @@ set_gen_mem() {
                 return -1;
             }
         }
-        // sleep(1);
+        sleep(1);
         offset += nf10.queue_pages[i];
     }
     return 0;
@@ -300,10 +320,10 @@ nf_init(int pad, int nodrop,int resolve_ns) {
         TAILQ_INIT(&nf10.cap_pkts[i]);
 
 
-    generator_rst(1);
-    stop_gen();
-    set_gen_mem();
-    generator_rst(0);
+//    generator_rst(1);
+//    stop_gen();
+//    set_gen_mem();
+//    generator_rst(0);
 
     wraxi(DELAY_HEADER_EXTRACTOR_BASE_ADDR + DELAY_HEADER_EXTRACTOR_RST, 0);
     wraxi(DELAY_HEADER_EXTRACTOR_BASE_ADDR + DELAY_HEADER_EXTRACTOR_SET, 0);
@@ -314,7 +334,7 @@ nf_init(int pad, int nodrop,int resolve_ns) {
 int nf_start(int wait) {
     int if_fd, i, j;
     uint32_t ix;
-    char if_name[10];
+    char if_name[IFNAMSIZ];
     struct sockaddr_ll socket_address;
     struct ifreq ifr;
 
@@ -326,13 +346,16 @@ int nf_start(int wait) {
     socket_address.sll_halen = ETH_ALEN;
 
     stop_gen();
+    generator_rst(1);
+    rst_gen_mem();
+    generator_rst(0);
     set_gen_mem();
 
-    pthread_create(&nf10.cap_tid, &attr, (void *)nf_cap_run, NULL);
-    for ( i = 0; i < 4; i++) {
+
+    for ( i = 0; i < NUM_PORTS; i++) {
         sprintf(if_name, "nf%d", i);
 
-        if_fd = socket(AF_PACKET, SOCK_RAW,  IPPROTO_RAW);
+        if_fd = socket(AF_PACKET, SOCK_RAW,  htons(ETH_P_ALL));
         if (if_fd < 0) {
             perror("socket");
             return -1;
@@ -345,16 +368,36 @@ int nf_start(int wait) {
             return -1;
         }
         socket_address.sll_ifindex = ifr.ifr_ifindex;
+        socket_address.sll_family = PF_PACKET;
+        socket_address.sll_protocol = htons(ETH_P_IP);
+        /*ARP hardware identifier is ethernet*/
+        // socket_address.sll_hatype   = ARPHRD_ETHER;
+
+        /*target is another host*/
+        socket_address.sll_pkttype  = PACKET_OTHERHOST;
+
+        /*address length*/
+        socket_address.sll_halen    = ETH_ALEN;
+
         ix = 0;
+        printf("adding %d packet on port %s\n", nf10.queue_pkts[i], if_name);
         for (j = 0; j < nf10.queue_pkts[i]; j++) {
             if (sendto(if_fd, nf10.queue_data[i] + ix, nf10.pkt_len[i][j], 0,
                         (struct sockaddr*)&socket_address, sizeof(struct sockaddr_ll)) < 0)
                 perror("Send failed");
             ix += nf10.pkt_len[i][j];
+            if (j%10 == 0) {
+                usleep(.1);
+                printf("sleeping\n");
+            }
         }
         close(if_fd);
     }
+    printf("finished doing stuff...\n");
+    sleep(1);
+    pthread_create(&nf10.cap_tid, &attr, (void *)nf_cap_run, NULL);
     nf10.gen_start = ((double)time(NULL));
+    stop_gen();
     start_gen();
 
     return 0;
@@ -632,11 +675,12 @@ int nf_cap_run()
             else if(port_encoded & 0x0040)
                 port=3;
             if (nf10.cap_fd[port] > 0) {
+                if (pkt_count % 100000 == 0) printf("got a packet on port %d writing on fd %d\n",
+                        port, nf10.cap_fd[port]);
                 pthread_mutex_lock(&nf10.pkt_lock);
                 TAILQ_INSERT_TAIL(&nf10.cap_pkts[port], cap, entries);
                 pthread_mutex_unlock(&nf10.pkt_lock);
                 write(nf10.cap_fd[port], &fd_ix, sizeof(uint64_t));
-                if (pkt_count % 100000 == 0) printf("got a packet on port %d writing on fd %d\n", port, nf10.cap_fd[port]);
             }
 
             rx_dne_head = ((rx_dne_head + 64) & rx_dne_mask);
@@ -731,6 +775,3 @@ nf_gen_extract_header(struct nf_cap_t *cap, const uint8_t *b, int len) {
     //	 ret->tv_sec, ret->tv_usec);
     return ret;
 }
-
-
-
