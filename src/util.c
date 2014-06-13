@@ -62,16 +62,3 @@ uint16_t cksm(int length, uint32_t buf[]) {
 
 	return ((uint16_t)sum);
 }
-
-void *xmalloc(size_t size) {
-  void *ret;
-
-  ret = malloc(size);
-
-  if(ret == NULL) {
-    perror("malloc");
-    exit(1);
-  }
-  
-  return ret;
-}
