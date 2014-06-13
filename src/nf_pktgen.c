@@ -36,38 +36,38 @@ struct nf_cap_t {
 };
 
 struct str_nf_pktgen {
-  uint32_t *queue_words;
-  uint32_t *queue_bytes;
-  uint32_t *queue_pkts;
-  uint32_t *num_pkts;
-  int *queue_base_addr;
+  uint32_t queue_words[NUM_PORTS];
+  uint32_t queue_bytes[NUM_PORTS];
+  uint32_t queue_pkts[NUM_PORTS];
+  uint32_t num_pkts[NUM_PORTS];
+  int queue_base_addr[NUM_PORTS];
 
-  uint32_t *sec_current;
-  uint32_t *usec_current;
+  uint32_t sec_current[NUM_PORTS];
+  uint32_t usec_current[NUM_PORTS];
 
-  char **queue_data;
-  uint32_t *queue_data_len;
+  char *queue_data[NUM_PORTS];
+  uint32_t queue_data_len[NUM_PORTS];
 
   //rate limiter variables
-  float *rate;
-  uint8_t *rate_enable;
-  uint32_t *clks_between_tokens; // = 1;
-  float * number_tokens;
+  float rate[NUM_PORTS];
+  uint8_t rate_enable[NUM_PORTS];
+  uint32_t clks_between_tokens[NUM_PORTS]; // = 1;
+  float number_tokens[NUM_PORTS];
 
   /*   float *clks_between_tokens; */
   /*   float *number_tokens; */
 
-  uint32_t *last_len;
-  uint32_t *last_sec;
-  uint32_t *last_nsec;
+  uint32_t last_len[NUM_PORTS];
+  uint32_t last_sec[NUM_PORTS];
+  uint32_t last_nsec[NUM_PORTS];
 
-  uint32_t *final_pkt_delay;
-  uint32_t *iterations;
-  float *delay;
+  uint32_t final_pkt_delay[NUM_PORTS];
+  uint32_t iterations[NUM_PORTS];
+  float delay[NUM_PORTS];
 
-  struct nf_cap_t *obj_cap;
+  struct nf_cap_t obj_cap[NUM_PORTS];
 
-  float *usec_per_byte;
+  float usec_per_byte[NUM_PORTS];
 
   int pad;
   int resolve_ns;
@@ -134,88 +134,37 @@ nf_init(int pad, int nodrop,int resolve_ns) {
   lldiv_t res;
 
   printf("Initializing pkt gen library\n");
-  free(nf_pktgen.queue_words);
-  nf_pktgen.queue_words = (uint32_t *)xmalloc(NUM_PORTS*sizeof(uint32_t));
   bzero(nf_pktgen.queue_words, NUM_PORTS*sizeof(uint32_t));
-  free(nf_pktgen.queue_bytes);
-  nf_pktgen.queue_bytes = (uint32_t *)xmalloc(NUM_PORTS*sizeof(uint32_t));
   bzero(nf_pktgen.queue_bytes, NUM_PORTS*sizeof(uint32_t));
-  free(nf_pktgen.queue_pkts);
-  nf_pktgen.queue_pkts = (uint32_t *)xmalloc(NUM_PORTS*sizeof(uint32_t));
   bzero(nf_pktgen.queue_pkts, NUM_PORTS*sizeof(uint32_t));
-  free(nf_pktgen.queue_base_addr);
-  nf_pktgen.queue_base_addr = (int *)xmalloc(NUM_PORTS*sizeof(int));
   bzero(nf_pktgen.queue_base_addr, NUM_PORTS*sizeof(int));
-  free(nf_pktgen.num_pkts);
-  nf_pktgen.num_pkts = (uint32_t *)xmalloc(NUM_PORTS*sizeof(uint32_t));
   bzero(nf_pktgen.num_pkts, NUM_PORTS*sizeof(uint32_t));
-
-  free(nf_pktgen.sec_current);
-  nf_pktgen.sec_current = (uint32_t *)xmalloc(NUM_PORTS*sizeof(uint32_t));
-  bzero(nf_pktgen.sec_current, NUM_PORTS*sizeof(uint32_t));
-  free(nf_pktgen.usec_current);
-  nf_pktgen.usec_current = (uint32_t *)xmalloc(NUM_PORTS*sizeof(uint32_t));
+bzero(nf_pktgen.sec_current, NUM_PORTS*sizeof(uint32_t));
   bzero(nf_pktgen.usec_current, NUM_PORTS*sizeof(uint32_t));
-
-  free(nf_pktgen.queue_data);
-  nf_pktgen.queue_data = (char **)xmalloc(NUM_PORTS*sizeof(char *));
   bzero(nf_pktgen.queue_data, NUM_PORTS*sizeof(char *));
-  free(nf_pktgen.queue_data_len);
-  nf_pktgen.queue_data_len = (uint32_t *)xmalloc(NUM_PORTS*sizeof(uint32_t));
   bzero(nf_pktgen.queue_data_len, NUM_PORTS*sizeof(uint32_t));
-
-  free(nf_pktgen.rate);
-  nf_pktgen.rate = (float *)xmalloc(NUM_PORTS*sizeof(float));
   bzero(nf_pktgen.rate, NUM_PORTS*sizeof(float));
-
-  free(nf_pktgen.rate_enable);
-  nf_pktgen.rate_enable = (uint8_t *)xmalloc(NUM_PORTS*sizeof(uint8_t));
   bzero(nf_pktgen.rate_enable, NUM_PORTS*sizeof(uint8_t));
 
-  free(nf_pktgen.clks_between_tokens);
-  nf_pktgen.clks_between_tokens = (uint32_t *)xmalloc(NUM_PORTS*sizeof(uint32_t));
-  bzero(nf_pktgen.clks_between_tokens, NUM_PORTS*sizeof(uint32_t));
   for (i = 0; i < NUM_PORTS; i++) nf_pktgen.clks_between_tokens[i] = 1;
-  free(nf_pktgen.number_tokens);
-  nf_pktgen.number_tokens = (float *)xmalloc(NUM_PORTS*sizeof(float));
-  bzero(nf_pktgen.number_tokens, NUM_PORTS*sizeof(float));
   for (i = 0; i < NUM_PORTS; i++) nf_pktgen.number_tokens[i] = 1;
 
-  free(nf_pktgen.last_len);
-  nf_pktgen.last_len = (uint32_t *)xmalloc(NUM_PORTS*sizeof(uint32_t));
   bzero(nf_pktgen.last_len, NUM_PORTS*sizeof(uint32_t));
-  free(nf_pktgen.last_nsec);
-  nf_pktgen.last_nsec = (uint32_t *)xmalloc(NUM_PORTS*sizeof(uint32_t));
   bzero(nf_pktgen.last_nsec, NUM_PORTS*sizeof(uint32_t));
-  free(nf_pktgen.last_sec);
-  nf_pktgen.last_sec = (uint32_t *)xmalloc(NUM_PORTS*sizeof(uint32_t));
   bzero(nf_pktgen.last_sec, NUM_PORTS*sizeof(uint32_t));
 
-  free(nf_pktgen.usec_per_byte);
-  nf_pktgen.usec_per_byte = (float *)xmalloc(NUM_PORTS*sizeof(float));
-  for (i = 0; i< NUM_PORTS; i++) {
-    nf_pktgen.usec_per_byte[i] = USEC_PER_BYTE;
-  }
+  for (i = 0; i< NUM_PORTS; i++) nf_pktgen.usec_per_byte[i] = USEC_PER_BYTE;
 
-  free(nf_pktgen.final_pkt_delay);
-  nf_pktgen.final_pkt_delay = (uint32_t *)xmalloc(NUM_PORTS*sizeof(uint32_t));
   bzero(nf_pktgen.final_pkt_delay, NUM_PORTS*sizeof(uint32_t));
-  free(nf_pktgen.iterations);
-  nf_pktgen.iterations = (uint32_t *)xmalloc(NUM_PORTS*sizeof(uint32_t));
-  for (i = 0 ; i < NUM_PORTS ; i++)
-    nf_pktgen.iterations[i] = 0;
-  free(nf_pktgen.delay);
-  nf_pktgen.delay = (float *)xmalloc(NUM_PORTS*sizeof(float));
+  for (i = 0 ; i < NUM_PORTS ; i++) nf_pktgen.iterations[i] = 0;
   bzero(nf_pktgen.delay, NUM_PORTS*sizeof(float));
 
-  free(nf_pktgen.obj_cap);
-  nf_pktgen.obj_cap = (struct nf_cap_t *)xmalloc(NUM_PORTS*sizeof(struct nf_cap_t));
   for (i = 0; i< NUM_PORTS; i++) {
     nf_pktgen.obj_cap[i].cap_fd = -1;
     nf_pktgen.obj_cap[i].intf_ix = i;
-    nf_pktgen.obj_cap[i].name = (char *)xmalloc(sizeof("nf2cX"));
+    nf_pktgen.obj_cap[i].name = (char *)malloc(sizeof("nf2cX"));
     sprintf(nf_pktgen.obj_cap[i].name, "nf2c%1d", i);
-    nf_pktgen.obj_cap[i].cap_hdr = (struct pcap_pkthdr *)xmalloc(sizeof(struct pcap_pkthdr));
+    nf_pktgen.obj_cap[i].cap_hdr = (struct pcap_pkthdr *)malloc(sizeof(struct pcap_pkthdr));
     bzero(nf_pktgen.obj_cap[i].cap_hdr,sizeof(struct pcap_pkthdr));
     nf_pktgen.obj_cap[i].packet_cache = NULL;
     nf_pktgen.obj_cap[i].caplen = 0;
@@ -253,7 +202,7 @@ nf_init(int pad, int nodrop,int resolve_ns) {
   readReg(&nf_pktgen.nf2, COUNTER_BIT_63_32_REG, &counter_l);
   timer = ((uint64_t)counter_h<<32) + (uint64_t)(0xFFFFFFFF&counter_l);
   timer = CORRECTION*timer;
-  printf("counter: %llx %lx %lx\n", timer, counter_h, counter_l);
+  printf("counter: %lx %x %x\n", timer, counter_h, counter_l);
 
   if(nf_pktgen.resolve_ns) {
     res = lldiv(timer, powl(10,6));
@@ -408,8 +357,8 @@ nf_gen_load_packet(struct pcap_pkthdr *h, const unsigned char *data, int port,
   if ( (packet_words + nf_pktgen.total_words) > MAX_TX_QUEUE_SIZE) {
     printf("Warning: unable to load all packets from pcap file. SRAM queues are full.\n");
     printf("Total output queue size: %d words\n",MAX_TX_QUEUE_SIZE);
-    printf("Current queue occupancy: %lu words\n", nf_pktgen.total_words);
-    printf("Packet size:%lu words\n", packet_words);
+    printf("Current queue occupancy: %u words\n", nf_pktgen.total_words);
+    printf("Packet size:%u words\n", packet_words);
     return 0;
   } else {
     nf_pktgen.total_words += packet_words;
@@ -1220,7 +1169,7 @@ nf_cap_enable(char *dev_name, int caplen) {
 
   //allocate memory for the packet
   cap->caplen = caplen;
-  cap->packet_cache = (uint8_t *)xmalloc(caplen);
+  cap->packet_cache = (uint8_t *)malloc(caplen);
   if(!cap->packet_cache) {
     return NULL;
   }
@@ -1344,7 +1293,7 @@ nf_cap_next(struct nf_cap_t *cap, struct pcap_pkthdr *h) {
     diff =  ((int32_t)h->ts.tv_sec - (int32_t)old_header.ts.tv_sec)*1000000 +
       (int32_t)h->ts.tv_usec - (int32_t)old_header.ts.tv_usec;
 
-    fprintf(test_output, "%lu.%06lu %lu.%06lu %lld %llu %lu.%06lu %llu.%09llu\n",
+    fprintf(test_output, "%lu.%06lu %lu.%06lu %u %lu %lu.%06lu %llu.%09llu\n",
         old_header.ts.tv_sec,old_header.ts.tv_usec,
         h->ts.tv_sec, h->ts.tv_usec, diff,
         time_count, nf_pktgen.start.tv_sec, nf_pktgen.start.tv_usec,
