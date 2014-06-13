@@ -188,7 +188,7 @@ int nf_gen_load_pcap(const char *filename, int port, uint64_t ns_delay) {
 int
 generator_rst(uint32_t val) {
     int ret = wraxi(PCAP_ENGINE_BASE_ADDR + PCAP_ENGINE_RESET, val);
-    sleep(1);
+    //sleep(1);
     return ret;
 }
 
@@ -234,7 +234,7 @@ start_gen() {
             perror("PCAP_ENGINE_ENABLE error");
             return -1;
         }
-        sleep(0.1);
+        // sleep(0.1);
     }
     return 0;
 }
@@ -286,7 +286,7 @@ set_gen_mem() {
                 return -1;
             }
         }
-        sleep(1);
+        // sleep(1);
         offset += nf10.queue_pages[i];
     }
     return 0;
@@ -387,14 +387,14 @@ int nf_start(int wait) {
                 perror("Send failed");
             ix += nf10.pkt_len[i][j];
             if (j%10 == 0) {
-                usleep(.1);
+                // usleep(.1);
                 printf("sleeping\n");
             }
         }
         close(if_fd);
     }
     printf("finished doing stuff...\n");
-    sleep(1);
+    usleep(1);
     pthread_create(&nf10.cap_tid, &attr, (void *)nf_cap_run, NULL);
     nf10.gen_start = ((double)time(NULL));
     stop_gen();
@@ -674,10 +674,10 @@ int nf_cap_run()
                 port=2;
             else if(port_encoded & 0x0040)
                 port=3;
-            if (nf10.cap_fd[port] > 0) {
                 if (pkt_count % 100000 == 0) printf("got a packet on port %d writing on fd %d\n",
                         port, nf10.cap_fd[port]);
-                pthread_mutex_lock(&nf10.pkt_lock);
+             if (nf10.cap_fd[port] > 0) {
+               pthread_mutex_lock(&nf10.pkt_lock);
                 TAILQ_INSERT_TAIL(&nf10.cap_pkts[port], cap, entries);
                 pthread_mutex_unlock(&nf10.pkt_lock);
                 write(nf10.cap_fd[port], &fd_ix, sizeof(uint64_t));
