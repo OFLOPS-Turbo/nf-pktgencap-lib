@@ -8,6 +8,8 @@ config.h.in
 config.h.in~
 aclocal.m4
 config.log
+.deps
+.libs
 
 Makefile
 Makefile.in
@@ -67,3 +69,5 @@ Makefile.in
 /missing
 /stamp-h1
 
+libtool
+config.status
