@@ -4,7 +4,8 @@ AC_INIT([netfpga-packet-generator-c-library], [0.01], [cr409@cl.cam.ac.uk])
 ${CFLAGS=""}
 AC_PROG_CC
 AM_INIT_AUTOMAKE([-Wall foreign])
-AM_PROG_AR
+# AM_PROG_AR
+m4_ifdef([AM_PROG_AR], [AM_PROG_AR])
 AM_PROG_CC_C_O
 
 AC_CONFIG_SRCDIR([src])

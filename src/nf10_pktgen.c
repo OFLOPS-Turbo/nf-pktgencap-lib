@@ -519,7 +519,7 @@ const uint8_t *nf_cap_next(struct nf_cap_t *cap, struct pcap_pkthdr *h) {
     struct pcap_packet_t *pkt;
     uint8_t *ret;
 
-    read(nf10.cap_fd[cap->if_ix], &i, sizeof(i));
+    // read(nf10.cap_fd[cap->if_ix], &i, sizeof(i));
     if (!TAILQ_EMPTY(&nf10.cap_pkts[cap->if_ix])) {
         pthread_mutex_lock(&nf10.pkt_lock);
         pkt = TAILQ_FIRST(&nf10.cap_pkts[cap->if_ix]);
@@ -674,13 +674,14 @@ int nf_cap_run()
                 port=2;
             else if(port_encoded & 0x0040)
                 port=3;
-                if (pkt_count % 100000 == 0) printf("got a packet on port %d writing on fd %d\n",
-                        port, nf10.cap_fd[port]);
+ 	    if (pkt_count % 100000 == 0) 
+		    printf("got a packet on port %d writing on fd %d\n",
+				    port, nf10.cap_fd[port]);
              if (nf10.cap_fd[port] > 0) {
-               pthread_mutex_lock(&nf10.pkt_lock);
-                TAILQ_INSERT_TAIL(&nf10.cap_pkts[port], cap, entries);
-                pthread_mutex_unlock(&nf10.pkt_lock);
-                write(nf10.cap_fd[port], &fd_ix, sizeof(uint64_t));
+		     pthread_mutex_lock(&nf10.pkt_lock);
+		     TAILQ_INSERT_TAIL(&nf10.cap_pkts[port], cap, entries);
+		     pthread_mutex_unlock(&nf10.pkt_lock);
+		     write(nf10.cap_fd[port], &fd_ix, sizeof(uint64_t));
             }
 
             rx_dne_head = ((rx_dne_head + 64) & rx_dne_mask);
@@ -739,12 +740,13 @@ nf_gen_extract_header(struct nf_cap_t *cap, const uint8_t *b, int len) {
 
     if((0xFFFFFFFF & ntohl(ret->magic)) != 0xdeadbeef) { //sometimes the 1st byte is messed up
         //if the vlan tag is stripped move the translation by 4 bytes.
-        /*printf("Packet gen packet received %08lx\n",ntohl(ret->magic));*/
+//        printf("Packet gen packet received %08lx\n",ntohl(ret->magic));
         ret = (struct pktgen_hdr *)((uint8_t *)b + 54);
         if((0xFFFFFFFF & ntohl(ret->magic)) != 0xdeadbeef) {
-            /*printf("reading header %08lx\n", 0xFFFFFFFF & ntohl(ret->magic));*/
+ //           printf("reading header %08lx\n", 0xFFFFFFFF & ntohl(ret->magic));
             ret = (struct pktgen_hdr *)((uint8_t *)b + 64);
             if((0xFFFFFFFF & ntohl(ret->magic)) != 0xdeadbeef) {
+//		    printf("reading header %08lx\n", 0xFFFFFFFF & ntohl(ret->magic));
                 return NULL;
             }
         }
