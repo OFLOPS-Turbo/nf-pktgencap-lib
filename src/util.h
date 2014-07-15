@@ -17,5 +17,6 @@
 uint8_t *parseip(char *str);
 uint8_t *parsemac(char *str);
 uint16_t cksm(uint16_t length, uint32_t buf[]);
+static void *xmalloc(size_t size);
 
 #endif

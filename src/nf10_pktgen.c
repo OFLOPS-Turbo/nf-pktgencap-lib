@@ -714,14 +714,14 @@ error_out:
     return -1;
 }
 
-int
-display_xmit_metrics(int queue, struct nf_gen_stats *stat) {
-    printf("Unimplemented function display_xmit_metrics\n");
-    return 0;
-    // readReg(&nf_pktgen.nf2,
-    //     OQ_QUEUE_0_NUM_PKTS_REMOVED_REG+(queue+8)*nf_pktgen.queue_addr_offset,
-    //     &stat->pkt_snd_cnt);
-}
+// int
+// display_xmit_metrics(int queue, struct nf_gen_stats *stat) {
+//     printf("Unimplemented function display_xmit_metrics\n");
+//     return 0;
+//     // readReg(&nf_pktgen.nf2,
+//     //     OQ_QUEUE_0_NUM_PKTS_REMOVED_REG+(queue+8)*nf_pktgen.queue_addr_offset,
+//     //     &stat->pkt_snd_cnt);
+// }
 
 struct str_nf_pktgen nf_pktgen;
 

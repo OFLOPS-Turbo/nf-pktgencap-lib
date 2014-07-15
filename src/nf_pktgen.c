@@ -1286,22 +1286,6 @@ nf_cap_next(struct nf_cap_t *cap, struct pcap_pkthdr *h) {
     h->ts.tv_usec -= 1000000;
     h->ts.tv_sec++;
   }
-  /*   } */
-
-  if(test_output) {
-    int32_t diff;
-    diff =  ((int32_t)h->ts.tv_sec - (int32_t)old_header.ts.tv_sec)*1000000 +
-      (int32_t)h->ts.tv_usec - (int32_t)old_header.ts.tv_usec;
-
-    fprintf(test_output, "%lu.%06lu %lu.%06lu %u %lu %lu.%06lu %llu.%09llu\n",
-        old_header.ts.tv_sec,old_header.ts.tv_usec,
-        h->ts.tv_sec, h->ts.tv_usec, diff,
-        time_count, nf_pktgen.start.tv_sec, nf_pktgen.start.tv_usec,
-        res.quot, res.rem);
-  }
-
-  //return data
-  //  printf("%d %d %d", cap->caplen, len - 24, , );
   memcpy(cap->packet_cache, pcap_data + 24, len);
 
   return cap->packet_cache;
