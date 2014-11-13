@@ -50,7 +50,7 @@ struct nf_gen_stats {
  */
 struct pktgen_hdr {
     uint32_t magic;     ///< Constant 32-bit string allowing the identification
-    /// of the header start.
+					    ///   of the header start.
     uint32_t seq_num;   ///< A monotonically increasing packet sequence counter.
     uint32_t tv_sec;    ///< The seconds timestamp of the packet generation.
     uint32_t tv_usec;   ///< The nanoseconds timestamp of the packet generation.
@@ -196,5 +196,10 @@ void  nf_cap_timeofday(struct timeval *now);
  */
 struct pktgen_hdr *nf_gen_extract_header(struct nf_cap_t *, const uint8_t *, int);
 /** @} */
+
+void nf_cap_add_rule(int, uint8_t, uint32_t, uint32_t, uint16_t, uint8_t, 
+		uint32_t, uint32_t, uint16_t);
+void nf_cap_clear_rule(int);
+void nf_cap_clear_rules();
 
 #endif
